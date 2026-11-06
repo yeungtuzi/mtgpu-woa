@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=winvm 托盘
+Comment=虚拟机状态指示与启动/停止/重启
+Exec=/usr/local/bin/winvm-tray-run
+Icon=computer
+Terminal=false
+X-KDE-autostart-after=panel

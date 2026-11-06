@@ -1,0 +1,478 @@
+#!/bin/bash
+# winvm - run a Windows 11 ARM64 guest on stock upstream QEMU.
+#
+#   display : virtio-gpu-pci -> QEMU -display dbus -> winvm-viewer
+#   disk    : virtio-blk-pci (viostor)
+#   network : virtio-net (netkvm), user mode + hostfwd for the guest agent
+#   audio   : intel-hda -> -audiodev pa
+#   gpu     : optional MTGPU vGPU via standard vfio-pci (mdev)
+#
+# Everything is configurable from /etc/winvm.conf (see winvm.conf.example).
+#
+# Usage: sudo winvm start|stop|status
+set -e
+
+CONF=${WINVM_CONF:-/etc/winvm.conf}
+# shellcheck disable=SC1090
+[ -r "$CONF" ] && . "$CONF"
+
+: "${QEMU_BIN:=/usr/bin/qemu-system-aarch64}"
+: "${IMG:=/var/lib/winvm/win11-arm64.qcow2}"
+: "${VARS:=/var/lib/winvm/vars.fd}"
+: "${VARS_TPL:=/usr/share/AAVMF/AAVMF_VARS.fd}"
+: "${CODE:=/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd}"
+: "${VIEWER:=/usr/local/bin/winvm-viewer}"
+: "${SPLASH:=/usr/local/share/winvm/winvm-splash.rgba}"
+: "${SPLASH_DIR:=/usr/local/share/winvm}"
+: "${DBUS_ADDR:=unix:path=/run/winvm-dbus/bus}"
+: "${QMP_SOCK:=/tmp/qemudisplay.sock}"
+: "${QGA_SOCK:=/tmp/winvm-qga.sock}"
+: "${AGENT_PORT:=8790}"
+: "${VERSION:=1.0}"
+: "${MEM:=8192}"
+: "${SMP:=4}"
+# The host power management on these laptops can offline the upper cores
+# without warning.  cpu0 can never be offlined, so pinning to the low cores
+# keeps the vCPU threads on cores that stay up; oversubscribing 8 vCPUs onto
+# 4 surviving cores is what makes the guest stutter.
+: "${CPUPIN:=0-$((SMP - 1))}"
+# 转发 guest 的 RDP 端口（显示通道）
+: "${RDP_PORT:=3389}"
+# 绑 0.0.0.0 允许局域网内其它客户端（Windows App / mstsc）直接连，
+# 绑 127.0.0.1 则只有本机能连
+: "${RDP_BIND:=127.0.0.1}"        # 默认只听本机，改这里就能对外
+: "${RDP_USER:=Administrator}"
+# 优先用自编译的 FreeRDP（系统包版本 WITH_GFX_H264=OFF，解不了 AVC444）
+: "${RDP_CLIENT:=}"
+: "${RDP_PASS:=}"
+# 启动后自动切到的 guest 分辨率（空 = 不动）
+: "${START_RES:=1920x1080}"
+# 显示通道：rdp = Windows 自带远程桌面（默认）；viewer = D-Bus + 自带窗口（兜底）。
+# rdp 模式下 guest 不挂任何虚拟显示适配器，只有 M1000 一块卡，
+# 于是 Windows 不需要跨显卡复制桌面，RDP 直接从 M1000 的桌面取帧。
+: "${MODE:=viewer}"
+: "${GUEST_W:=2560}"   # virtio-gpu EDID resolution
+: "${GUEST_H:=1600}"
+: "${MDEV_TYPE:=mt-igpu-0000}"
+: "${MDEV_PARENT:=/sys/class/mdev_bus/MGPU0001:00}"
+: "${UID_DESKTOP:=1000}"
+: "${DISPLAY_NUM:=:0}"
+
+
+# ---- guest agent / display scale -------------------------------------------
+# 切换 guest 分辨率。这个值直接决定 guest 内跨显卡复制的像素量，
+# 也是 2560x1600 下 Edge 卡的根因（见 docs/performance-diagnosis.md）。
+set_res() {
+  local spec="$1" w h
+  if ! [[ "$spec" =~ ^([0-9]{3,5})x([0-9]{3,5})$ ]]; then
+    echo "usage: winvm res <W>x<H>   e.g. winvm res 1920x1200"
+    return 1
+  fi
+  w="${BASH_REMATCH[1]}"; h="${BASH_REMATCH[2]}"
+  local out
+  out=$(agent_json "{\"cmd\":\"setres\",\"w\":$w,\"h\":$h}")
+  echo "$out" | head -c 200; echo
+  case "$w"x"$h" in
+    2560x1600) echo "note: presenting at 2560x1600 costs ~3.7x more than 1920x1200" ;;
+    1920x1200) echo "note: 1920x1200 is the recommended speed/space tradeoff" ;;
+  esac
+}
+
+agent_json() {
+  python3 - "$AGENT_PORT" "$1" <<'PYAGENT'
+import socket, sys
+port = int(sys.argv[1]); req = sys.argv[2]
+try:
+    s = socket.create_connection(("127.0.0.1", port), timeout=10)
+    s.settimeout(20)
+    f = s.makefile("rw", encoding="utf-8")
+    f.write(req + "\n"); f.flush()
+    print(f.readline().strip())
+except Exception as exc:
+    print('{"ok":false,"err":"%s"}' % exc)
+PYAGENT
+}
+
+# The guest has to use the same scale as the desktop, otherwise Windows renders
+# everything at half size inside the viewer window. Read it from KWin's own
+# config file first: that works without a Wayland session in the environment.
+detect_scale_percent() {
+  local pct="" home_desktop
+  home_desktop=$(getent passwd "${UID_DESKTOP:-1000}" 2>/dev/null | cut -d: -f6)
+  [ -z "$home_desktop" ] && home_desktop="/home/${UID_DESKTOP:-1000}"
+  if [ -r "$home_desktop/.config/kwinoutputconfig.json" ]; then
+    pct=$(python3 -c '
+import json, sys
+try:
+    blocks = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+for blk in blocks:
+    if blk.get("name") != "outputs":
+        continue
+    for o in blk.get("data", []):
+        sc = o.get("scale")
+        if sc:
+            print(int(round(float(sc) * 100)))
+            sys.exit(0)
+' "$home_desktop/.config/kwinoutputconfig.json" 2>/dev/null)
+  fi
+  if [ -z "$pct" ]; then
+    for ksd in kscreen-doctor /opt/kde6/bin/kscreen-doctor; do
+      command -v "$ksd" >/dev/null 2>&1 || [ -x "$ksd" ] || continue
+      pct=$(XDG_RUNTIME_DIR="/run/user/${UID_DESKTOP:-1000}" \
+            WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}" \
+            "$ksd" -j 2>/dev/null | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    outs = [o for o in d.get("outputs", []) if o.get("enabled")]
+    print(int(round(float(outs[0]["scale"]) * 100)) if outs else "")
+except Exception:
+    print("")
+' 2>/dev/null)
+      [ -n "$pct" ] && break
+    done
+  fi
+  echo "$pct"
+}
+
+dpi_sync() {
+  local pct="${1:-}"
+  [ -z "$pct" ] && pct=$(detect_scale_percent)
+  if [ -z "$pct" ]; then
+    echo "dpi: cannot detect the desktop scale; pass a percentage: winvm dpi 200"
+    return 1
+  fi
+  local cur
+  cur=$(agent_json '{"cmd":"getdpi"}' | sed -n 's/.*"percent":\([-0-9]*\).*/\1/p')
+  if [ "$cur" = "$pct" ]; then
+    echo "dpi: guest already at ${pct}%"
+    return 0
+  fi
+  agent_json "{\"cmd\":\"setdpi\",\"percent\":$pct}" >/dev/null
+  echo "dpi: guest set to ${pct}% (log off/on inside Windows to apply)"
+}
+
+# SIGTERM only: a SIGKILLed QEMU can leave its qcow2 locks and sockets behind
+# until the next reboot.  Give it up to 10 s, then report.
+kill_matching() {
+  local pat="$1" pids i
+  for i in $(seq 1 10); do
+    pids=$(pgrep -f "$pat" 2>/dev/null || true)
+    [ -z "$pids" ] && return 0
+    # shellcheck disable=SC2086
+    kill $pids 2>/dev/null || true
+    sleep 1
+  done
+  echo "warning: '$pat' still running (pids: $pids)" >&2
+  return 1
+}
+
+mdev_prepare() {
+  local u
+  u=$(ls /sys/bus/mdev/devices/ 2>/dev/null | head -1)
+  if [ -z "$u" ]; then
+    u=$(uuidgen)
+    # NOTE: never write to .../<uuid>/remove -- on some drivers that path
+    # crashes the host kernel.  Create-only.
+    echo "$u" > "$MDEV_PARENT/mdev_supported_types/$MDEV_TYPE/create"
+    sleep 2
+  fi
+  echo "$u"
+}
+
+start() {
+  mkdir -p "$(dirname "$VARS")"
+  [ -f "$VARS" ] || cp "$VARS_TPL" "$VARS"
+
+  systemctl start winvm-dbus
+  for _ in $(seq 1 20); do [ -S "${DBUS_ADDR#unix:path=}" ] && break; sleep 0.2; done
+
+  local u="" gpu=() fw=() disp=() viewer_be=()
+  if [ -d "$MDEV_PARENT/mdev_supported_types/$MDEV_TYPE" ] && [ "${ENABLE_GPU:-1}" = 1 ]; then
+    u=$(mdev_prepare)
+    if [ "$MODE" = rdp ]; then
+      # 只要 GPU，不要任何虚拟显示适配器
+      gpu=(-device vfio-pci,sysfsdev=/sys/bus/mdev/devices/"$u",addr=0x6)
+    else
+      gpu=(-device vfio-pci,sysfsdev=/sys/bus/mdev/devices/"$u",addr=0x6)
+    fi
+  fi
+  local audio=()
+  if [ "$MODE" = rdp ]; then
+    # 上游 QEMU 支持 PulseAudio；没有声卡时 Windows 没有音频端点，
+    # RDP 的音频重定向就无从谈起。
+    # 必须用 pa 后端：实测 -audiodev none 时 rdpsnd 收不到音频
+    # （客户端侧没有音频流），宿主上 QEMU 会同时播一遍，可接受。
+    audio=(-audiodev pa,id=snd0,server=unix:/run/user/"$UID_DESKTOP"/pulse/native
+           -device intel-hda -device hda-duplex,audiodev=snd0)
+    fw=(-drive if=pflash,format=raw,unit=0,file="$CODE",readonly=on
+        -drive if=pflash,format=raw,unit=1,file="$VARS")
+    disp=(-display none)
+  else
+    fw=(-drive if=pflash,format=raw,unit=0,file="$CODE",readonly=on
+        -drive if=pflash,format=raw,unit=1,file="$VARS")
+    disp=(-display dbus,addr="$DBUS_ADDR")
+    viewer_be=(--dbus-display "$DBUS_ADDR" --width "$GUEST_W" --height "$GUEST_H")
+    audio=(-audiodev pa,id=snd0,server=unix:/run/user/"$UID_DESKTOP"/pulse/native
+           -device intel-hda -device hda-duplex,audiodev=snd0)
+  fi
+
+  kill_matching "$VIEWER"
+  kill_matching "$QEMU_BIN"
+  sleep 2
+  rm -f "$QMP_SOCK" "$QGA_SOCK"
+
+  local pin=()
+  if [ -n "$CPUPIN" ] && command -v taskset >/dev/null 2>&1; then
+    pin=(taskset -c "$CPUPIN")
+  fi
+  local qbin="$QEMU_BIN"
+  "${pin[@]}" "$qbin" -M virt -accel kvm -cpu host -m "$MEM" -smp "$SMP" \
+    "${fw[@]}" \
+    -drive file="$IMG",if=none,id=hd0,format=qcow2,cache=writeback \
+    -device virtio-blk-pci,drive=hd0,addr=0xa \
+    -nic type=user,model=virtio,hostfwd=tcp:127.0.0.1:"$AGENT_PORT"-:"$AGENT_PORT",hostfwd=tcp:"$RDP_BIND":"$RDP_PORT"-:3389 \
+    -device qemu-xhci,addr=0x7 \
+    -chardev socket,path="$QGA_SOCK",server=on,wait=off,id=qga0 \
+    -device virtio-serial-pci,addr=0x8 \
+    -device virtserialport,chardev=qga0,name=org.qemu.guest_agent.0 \
+    -device usb-tablet \
+    -device usb-kbd \
+    $([ "$MODE" = rdp ] || echo "-device virtio-gpu-pci,addr=0x5,edid=on,xres=$GUEST_W,yres=$GUEST_H") \
+    "${gpu[@]}" \
+    "${audio[@]}" \
+    "${disp[@]}" \
+    -qmp unix:"$QMP_SOCK",server,nowait \
+    -daemonize -pidfile /tmp/winvm-qemu.pid > /tmp/winvm-qemu.log 2>&1
+
+  sleep 3
+  local auth
+  # GNOME (mutter) and KDE (kwin) name the Xwayland auth file differently
+  auth=$(ls /run/user/"$UID_DESKTOP"/.mutter-Xwaylandauth.* \
+           /run/user/"$UID_DESKTOP"/xauth_* 2>/dev/null | head -1)
+  if [ "$MODE" != rdp ]; then
+    XDG_RUNTIME_DIR=/run/user/"$UID_DESKTOP" DISPLAY="$DISPLAY_NUM" XAUTHORITY="$auth" \
+      nohup "$VIEWER" "${viewer_be[@]}" --qmp "$QMP_SOCK" \
+        --splash "$SPLASH" --splash-dir "$SPLASH_DIR" \
+        --window-title "Windows 11" > /tmp/winvm-viewer.log 2>&1 &
+  fi
+
+  echo "started: qemu=$(cat /tmp/winvm-qemu.pid 2>/dev/null)${u:+ mdev=$u}"
+  sleep 3
+  agent_check
+  # RDP 必须等 guest 起来之后再连，否则客户端连不上会直接退出
+  if [ "$MODE" = rdp ]; then
+    rdp_start "$auth"
+  fi
+  # a VM has no reason to blank its screen or idle-suspend: apply once per start
+  agent_json '{"cmd":"tune"}' >/dev/null 2>&1 || true
+  # rdp 模式下 DPI 由客户端决定，且改 DPI 需要注销会话，得不偿失
+  if [ "$MODE" != rdp ]; then
+    [ "${WINVM_AUTO_DPI:-1}" = 1 ] && dpi_sync || true
+  fi
+  if [ -n "$START_RES" ]; then
+    local rw="${START_RES%x*}" rh="${START_RES#*x}"
+    if [ -n "$rw" ] && [ -n "$rh" ]; then
+      agent_json "{\"cmd\":\"setres\",\"w\":$rw,\"h\":$rh}" >/dev/null 2>&1 || true
+    fi
+  fi
+  perf_hint
+}
+
+# 提示用户分辨率与流畅度的关系：guest 内每帧都要把桌面从 vGPU 复制到
+# virtio-gpu，成本正比于像素数（实测 2560x1600=14.7fps, 1920x1200=25.0,
+# 1280x800=49.2）。不改默认，只让用户知道有这个开关。
+perf_hint() {
+  local out w h
+  out=$(agent_json '{"cmd":"getmode"}')
+  w=$(echo "$out" | grep -o '"w":[0-9]*' | cut -d: -f2)
+  h=$(echo "$out" | grep -o '"h":[0-9]*' | cut -d: -f2)
+  [ -z "$w" ] && return 0
+  if [ $((w * h)) -gt $((1920 * 1200)) ]; then
+    echo "hint: guest is ${w}x${h}.  Presentation cost scales with pixel count;"
+    echo "      'winvm res 1920x1200' raises a 2D/WebGL workload ~1.7x on this setup."
+  fi
+}
+
+# 发行版自带的 FreeRDP 是 WITH_GFX_H264=OFF 编译的，解不了 AVC444，
+# /gfx 会花屏。所以按"能力"挑客户端，而不是按固定路径。
+client_has_h264() {
+  local c="$1" lib
+  [ -x "$c" ] || return 1
+  lib=$(ldd "$c" 2>/dev/null | awk '/libfreerdp3/{print $3; exit}')
+  [ -n "$lib" ] && strings "$lib" 2>/dev/null | grep -q 'WITH_GFX_H264=ON'
+}
+
+pick_rdp_client() {
+  local c
+  for c in /usr/bin/xfreerdp /usr/local/bin/xfreerdp \
+           /home/*/FreeRDP/build/client/X11/xfreerdp; do
+    client_has_h264 "$c" && { echo "$c"; return 0; }
+  done
+  return 1
+}
+
+# 用 FreeRDP 接管控制台会话。必须 /admin，否则会被单会话策略踢掉。
+# 必须 setsid，否则调用方的会话结束会把它带走。
+rdp_start() {
+  local auth="$1"
+  local size="${START_RES:-1920x1080}"
+  local client="$RDP_CLIENT"
+  if [ -z "$client" ]; then
+    client=$(pick_rdp_client) || {
+      echo "rdp: no FreeRDP client with H.264 (WITH_GFX_H264=ON) found."
+      echo "     distro builds disable it, so /gfx would show garbage."
+      echo "     Install dist/freerdp3-winvm_*.deb or build from source (docs/INSTALL.md)."
+      return 1
+    }
+  fi
+  [ -n "${RDP_PASS:-}" ] || { echo "rdp: RDP_PASS is empty in config"; return 1; }
+  pkill -x xfreerdp3 2>/dev/null || true
+  pkill -x xfreerdp 2>/dev/null || true
+  sleep 1
+  # 分辨率、DPI、剪贴板、音频、断线重连全部交给 RDP 协议：
+  #   +dynamic-resolution  窗口变化时自动同步 guest 分辨率
+  #   +auto-reconnect      RDP 的自动重连
+  #   /scale:              DPI 缩放
+  # 因此 RDP 模式下不需要 winvm res / dpi 去驱动 guest。
+  setsid env XDG_RUNTIME_DIR=/run/user/"$UID_DESKTOP" DISPLAY="$DISPLAY_NUM" XAUTHORITY="$auth" \
+    "$client" /v:127.0.0.1:"$RDP_PORT" /u:"$RDP_USER" /p:"$RDP_PASS" \
+      /cert:ignore /size:"$size" /admin /network:lan \
+      +clipboard +dynamic-resolution +auto-reconnect /gfx /sound \
+      > /tmp/winvm-rdp.log 2>&1 < /dev/null &
+  echo "rdp: $client $size /gfx (log /tmp/winvm-rdp.log)"
+}
+
+# 只把画面窗口拉回来：虚拟机继续在后台跑，用户不用重启它。
+show_client() {
+  local auth
+  auth=$(ls /run/user/"$UID_DESKTOP"/.mutter-Xwaylandauth.* \
+           /run/user/"$UID_DESKTOP"/xauth_* 2>/dev/null | head -1)
+  if pgrep -x xfreerdp >/dev/null 2>&1 || pgrep -x xfreerdp3 >/dev/null 2>&1; then
+    XDG_RUNTIME_DIR=/run/user/"$UID_DESKTOP" DISPLAY="$DISPLAY_NUM" XAUTHORITY="$auth" \
+      xdotool search --class -- xfreerdp windowactivate --sync %@ 2>/dev/null || true
+    echo "client: already running (window raised)"
+    return 0
+  fi
+  if [ ! -f /tmp/winvm-qemu.pid ] || ! kill -0 "$(cat /tmp/winvm-qemu.pid 2>/dev/null)" 2>/dev/null; then
+    echo "vm: not running — start it first"
+    return 1
+  fi
+  rdp_start "$auth"
+}
+
+agent_check() {
+  if (exec 3<>/dev/tcp/127.0.0.1/"$AGENT_PORT") 2>/dev/null; then
+    exec 3<&- 3>&-
+    echo "guest agent: up (127.0.0.1:$AGENT_PORT)"
+  else
+    echo "guest agent: not reachable yet (it starts with the Windows session)"
+  fi
+}
+
+# 通用 QMP 命令（暂停/继续/查询状态）
+qmp_cmd() {
+  python3 - "$QMP_SOCK" "$1" <<'PY' 2>/dev/null
+import json, socket, sys
+sock, cmd = sys.argv[1], sys.argv[2]
+s = socket.socket(socket.AF_UNIX); s.settimeout(5)
+try:
+    s.connect(sock)
+    f = s.makefile("rw", encoding="utf-8")
+    f.readline()
+    f.write(json.dumps({"execute": "qmp_capabilities"}) + "\n"); f.flush(); f.readline()
+    f.write(json.dumps({"execute": cmd}) + "\n"); f.flush()
+    sys.stdout.write(f.readline().strip())
+except OSError:
+    sys.exit(1)
+PY
+}
+
+# ---- qemu-ga（标准 guest agent）----
+# 软关机/软重启优先走 qemu-ga：guest 内走正常关机流程，程序能存盘。
+# 没装 qemu-ga 时退回 QMP 的 ACPI 电源键，效果相当。
+qga_call() {
+  python3 - "$QGA_SOCK" "$1" <<'PY' 2>/dev/null
+import json, socket, sys
+sock, payload = sys.argv[1], sys.argv[2]
+s = socket.socket(socket.AF_UNIX)
+s.settimeout(8)
+try:
+    s.connect(sock)
+    s.sendall((payload + "\n").encode())
+    buf = b""
+    while b"\n" not in buf:
+        d = s.recv(65536)
+        if not d:
+            break
+        buf += d
+    sys.stdout.write(buf.decode(errors="replace"))
+except OSError:
+    sys.exit(1)
+PY
+}
+
+qga_available() {
+  [ -S "$QGA_SOCK" ] && qga_call '{"execute":"guest-ping"}' | grep -q '"return"'
+}
+
+qga_shutdown() {  # $1 = powerdown | reboot | halt
+  qga_call "{\"execute\":\"guest-shutdown\",\"arguments\":{\"mode\":\"$1\"}}"
+}
+
+stop() {
+  kill_matching "$VIEWER"
+  pkill -x xfreerdp3 2>/dev/null || true
+  pkill -x xfreerdp 2>/dev/null || true
+  # 优先让 guest 自己正常关机（qemu-ga），否则退回 ACPI 电源键
+  if qga_available; then
+    echo "qga: guest-shutdown (powerdown)"
+    qga_shutdown powerdown
+    return 0
+  fi
+  if [ -S "$QMP_SOCK" ]; then
+    python3 - "$QMP_SOCK" <<'PY' 2>/dev/null || true
+import socket, sys, time
+s = socket.socket(socket.AF_UNIX)
+s.connect(sys.argv[1])
+s.settimeout(5)
+time.sleep(0.3)
+try: s.recv(65536)
+except Exception: pass
+s.sendall(b'system_powerdown\n')
+time.sleep(1)
+s.close()
+PY
+  fi
+  echo "powerdown sent"
+}
+
+status() {
+  echo "qemu:   $(pgrep -af "$QEMU_BIN" | head -1)"
+  echo "viewer: $(pgrep -af "$VIEWER" | head -1)"
+  echo "dbus:   $(systemctl is-active winvm-dbus 2>/dev/null)"
+}
+
+case "${1:-start}" in
+  start)  start ;;
+  dpi)    dpi_sync "${2:-}" ;;
+  res)    set_res "${2:-}" ;;
+  version|--version|-v) echo "winvm $VERSION" ;;
+  show)   show_client ;;
+  state)  qmp_cmd query-status | python3 -c 'import sys,json; print(json.load(sys.stdin)["return"]["status"])' 2>/dev/null || echo unknown ;;
+  pause)  qmp_cmd stop && echo "vm: paused" ;;
+  resume) qmp_cmd cont && echo "vm: resumed" ;;
+  qga)    qga_call "${2:-{\"execute\":\"guest-ping\"}}" ;;
+  reboot)
+            if qga_available; then
+              echo "qga: guest-shutdown (reboot)"; qga_shutdown reboot
+            else
+              echo "reboot: qemu-ga not available (see guest/qemu-ga/)"
+              exit 1
+            fi ;;
+  stop)   stop ;;
+  status) status ;;
+  *) echo "usage: winvm start|show|stop|status|dpi [percent]|res <W>x<H>|version"; exit 1 ;;
+esac

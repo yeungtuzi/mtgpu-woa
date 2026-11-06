@@ -1,0 +1,37 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>raf probe</title>
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block;width:100vw;height:100vh}</style>
+</head><body><canvas id="c"></canvas>
+<script>
+// Measures the guest compositor's own present rate (requestAnimationFrame),
+// which is what the vGPU + DWM + virtio-gpu scanout path can actually sustain.
+const cv=document.getElementById("c");
+function fit(){cv.width=innerWidth;cv.height=innerHeight;}
+fit(); addEventListener("resize",fit);
+const gl=cv.getContext("webgl",{antialias:false,powerPreference:"high-performance"});
+const VS="attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}";
+const FS="precision highp float;uniform float t;void main(){vec2 u=gl_FragCoord.xy/vec2(1280.,800.);float a=0.;for(int i=0;i<40;i++){float f=float(i);a+=sin(u.x*9.+f+u.y*3.+t);}a=.5+.5*sin(a);gl_FragColor=vec4(a,a*.6,1.-a,1.);}";
+function sh(t,s){const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);return o;}
+const pr=gl.createProgram();gl.attachShader(pr,sh(gl.VERTEX_SHADER,VS));gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,FS));gl.linkProgram(pr);gl.useProgram(pr);
+const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);
+const l=gl.getAttribLocation(pr,"p");gl.enableVertexAttribArray(l);gl.vertexAttribPointer(l,2,gl.FLOAT,false,0,0);
+const ut=gl.getUniformLocation(pr,"t");
+let n=0,t0=performance.now();
+function frame(){
+  gl.viewport(0,0,cv.width,cv.height);
+  gl.uniform1f(ut,(performance.now()-t0)/1000);
+  gl.drawArrays(gl.TRIANGLES,0,6);
+  n++;
+  const el=performance.now()-t0;
+  if(el>6000){
+    const fps=n/(el/1000);
+    const dbg=gl.getExtension("WEBGL_debug_renderer_info");
+    const glr=dbg?gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL):"?";
+    document.title="RAF "+fps.toFixed(1)+" fps";
+    fetch("/result?case=raf cas="+cv.width+"x"+cv.height+" raf="+fps.toFixed(1)+" gl="+encodeURIComponent(glr),{mode:"no-cors"});
+    return;
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script></body></html>

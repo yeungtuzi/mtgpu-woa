@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>winvm bench</title>
+<style>html,body{margin:0;background:#111;color:#0f0;font:16px monospace}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1280" height="720"></canvas>
+<div id="out">running...</div>
+<script>
+const params = new URLSearchParams(location.search);
+const CASE = params.get('case') || 'unknown';
+const W = 1280, H = 720;
+
+// ---------- 2D: canvas2d, 3000 rotated gradient rects per frame ----------
+function bench2d(ms) {
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const g = cv.getContext('2d');
+  let frames = 0; const t0 = performance.now();
+  while (performance.now() - t0 < ms) {
+    g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+    for (let i = 0; i < 3000; i++) {
+      const x = (i * 37 + frames * 3) % W, y = (i * 53 + frames * 2) % H;
+      g.save();
+      g.translate(x, y);
+      g.rotate((i + frames) * 0.01);
+      const grd = g.createLinearGradient(-20, -20, 20, 20);
+      grd.addColorStop(0, 'hsl(' + ((i * 7 + frames) % 360) + ',80%,50%)');
+      grd.addColorStop(1, 'hsl(' + ((i * 11 + frames) % 360) + ',80%,30%)');
+      g.fillStyle = grd;
+      g.fillRect(-20, -20, 40, 40);
+      g.restore();
+    }
+    frames++;
+  }
+  return frames / ((performance.now() - t0) / 1000);
+}
+
+// ---------- 3D: raw WebGL, full-screen quad redrawn K times with a heavy shader ----------
+const VS = `
+attribute vec2 a_pos;
+void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }`;
+const FS = `
+precision highp float;
+uniform float u_t;
+uniform vec2 u_res;
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_res;
+  float acc = 0.0;
+  for (int i = 0; i < 48; i++) {
+    float fi = float(i);
+    vec2 p = uv * (1.0 + fi * 0.09) + vec2(sin(u_t + fi), cos(u_t * 1.3 + fi));
+    acc += sin(p.x * 9.0 + p.y * 3.0 + fi * 0.37) * cos(p.y * 7.0 - p.x * 2.0 + fi * 0.21);
+  }
+  acc = 0.5 + 0.5 * sin(acc);
+  gl_FragColor = vec4(acc, acc * 0.7, 1.0 - acc, 1.0);
+}`;
+
+function bench3d(ms, passes) {
+  const cv = document.getElementById('c');
+  const gl = cv.getContext('webgl', {antialias: false, powerPreference: 'high-performance'});
+  if (!gl) return {fps: -1, frames: 0, ms: 0, err: -2};
+  const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+  window.__glRenderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : 'unknown';
+  function sh(type, src) {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  const p = gl.createProgram();
+  gl.attachShader(p, sh(gl.VERTEX_SHADER, VS));
+  gl.attachShader(p, sh(gl.FRAGMENT_SHADER, FS));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  gl.useProgram(p);
+  const b = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, b);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(p, 'a_pos');
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  const uT = gl.getUniformLocation(p, 'u_t');
+  const uR = gl.getUniformLocation(p, 'u_res');
+  gl.uniform2f(uR, W, H);
+  gl.viewport(0, 0, W, H);
+  const px = new Uint8Array(4);
+  gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  gl.getError();
+  let frames = 0; const t0 = performance.now();
+  while (performance.now() - t0 < ms) {
+    gl.uniform1f(uT, (performance.now() - t0) / 1000);
+    for (let k = 0; k < passes; k++) gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    frames++;
+  }
+  return {fps: frames / ((performance.now() - t0) / 1000), frames: frames, ms: performance.now() - t0, err: gl.getError()};
+}
+
+function report(f2, r3) {
+  const f3 = r3.fps;
+  const txt = 'case=' + CASE + ' canvas2d=' + f2.toFixed(1) + ' webgl=' + (f3 < 0 ? 'n/a' : f3.toFixed(1)) + ' wframes=' + r3.frames + ' wms=' + r3.ms.toFixed(0) + ' glerr=' + r3.err + ' gl=' + (window.__glRenderer||'?').replace(/ /g,'_');
+  document.title = 'DONE ' + txt;
+  document.getElementById('out').textContent = txt;
+  fetch('/result?' + encodeURIComponent(txt), {mode: 'no-cors'}).catch(() => {});
+}
+
+setTimeout(() => {
+  document.getElementById('out').textContent = '2d phase...';
+  const f2 = bench2d(7000);
+  document.getElementById('out').textContent = '3d phase...';
+  const f3 = bench3d(9000, 24);
+  report(f2, f3);
+}, 300);
+</script>
+</body></html>

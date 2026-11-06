@@ -1,0 +1,52 @@
+<!doctype html><html><head><meta charset="utf-8">
+<style>html,body{margin:0;background:#000;overflow:hidden}
+#v{position:fixed;inset:0;width:100vw;height:100vh;object-fit:fill}
+#c{position:fixed;inset:0;width:100vw;height:100vh;opacity:.45}</style>
+</head><body>
+<video id="v" src="bench1080p.mp4" autoplay muted loop playsinline></video>
+<canvas id="c"></canvas>
+<script>
+const v=document.getElementById('v'), c=document.getElementById('c');
+function fit(){c.width=innerWidth;c.height=innerHeight;}
+fit();addEventListener('resize',fit);
+const gl=c.getContext('webgl');
+let rafN=0,vidN=0,t0=performance.now();
+function draw(t){
+  if(gl){
+    gl.viewport(0,0,c.width,c.height);
+    gl.clearColor(0.05,0.0,0.1,1);gl.clear(gl.COLOR_BUFFER_BIT);
+    const a=t*0.001;
+    // 三个旋转三角形，制造真实 3D 绘制负载
+    for(let i=0;i<3;i++){
+      const off=i*0.5, s=0.35+0.1*i;
+      const verts=[];
+      for(let k=0;k<3;k++){
+        const ang=a+off+k*2.0944;
+        verts.push(Math.cos(ang)*s, Math.sin(ang)*s);
+      }
+      const b=gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER,b);
+      gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(verts),gl.STATIC_DRAW);
+      const p=gl.createProgram(),vs=gl.createShader(gl.VERTEX_SHADER);
+      gl.shaderSource(vs,'attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}');
+      gl.compileShader(vs);gl.attachShader(p,vs);
+      const fs=gl.createShader(gl.FRAGMENT_SHADER);
+      gl.shaderSource(fs,'precision mediump float;void main(){gl_FragColor=vec4(1.,.6,.1,1.);}');
+      gl.compileShader(fs);gl.attachShader(p,fs);gl.linkProgram(p);gl.useProgram(p);
+      const loc=gl.getAttribLocation(p,'p');
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+      gl.drawArrays(gl.TRIANGLES,0,3);
+    }
+  }
+}
+function frame(t){rafN++;draw(t);requestAnimationFrame(frame);}
+requestAnimationFrame(frame);
+if(v.requestVideoFrameCallback){const vf=()=>{vidN++;v.requestVideoFrameCallback(vf);};v.requestVideoFrameCallback(vf);}
+setTimeout(()=>{
+  const dt=(performance.now()-t0)/1000;
+  const glr=gl?gl.getParameter(gl.RENDERER):'none';
+  const q='case=rafvid cas='+c.width+'x'+c.height+' raf='+(rafN/dt).toFixed(1)+' vid='+(vidN/dt).toFixed(1)+' gl='+encodeURIComponent(glr);
+  fetch('/result?'+q,{mode:'no-cors'});
+},12000);
+</script></body></html>

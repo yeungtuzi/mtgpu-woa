@@ -1,0 +1,12 @@
+[Unit]
+Description=winvm benchmark file and result server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/usr/local/share/winvm/bench
+ExecStart=/usr/bin/python3 /usr/local/share/winvm/bench/benchserver.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,25 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>raf tiny</title>
+<style>html,body{margin:0;background:#000;overflow:hidden}
+#box{position:absolute;width:100px;height:100px;background:#0f0;will-change:transform}</style>
+</head><body><div id="box"></div>
+<script>
+// Same rAF measurement, but only a 100x100 element moves. If the rate is still
+// low, the guest compositor itself is capped; if it jumps to ~60, the cost is
+// proportional to the number of pixels that change.
+const box=document.getElementById("box");
+let n=0,t0=performance.now();
+function frame(){
+  const t=(performance.now()-t0)/1000;
+  box.style.transform="translate("+(200+Math.sin(t)*300)+"px,"+(200+Math.cos(t)*200)+"px)";
+  n++;
+  const el=performance.now()-t0;
+  if(el>6000){
+    const fps=n/(el/1000);
+    document.title="TINY "+fps.toFixed(1);
+    fetch("/result?case=tiny cas="+innerWidth+"x"+innerHeight+" raf="+fps.toFixed(1),{mode:"no-cors"});
+    return;
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script></body></html>

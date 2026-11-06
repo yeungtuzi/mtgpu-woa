@@ -1,0 +1,19 @@
+# /etc/winvm.conf -- overrides for bin/winvm
+IMG=/var/lib/winvm/win11-arm64.qcow2
+VARS=/var/lib/winvm/vars.fd
+VIEWER=/usr/local/bin/winvm-viewer
+DBUS_ADDR=unix:path=/run/winvm-dbus/bus
+MEM=8192
+SMP=4
+# Pin the QEMU vCPU threads to cores the host keeps online.  Leave unset to
+# derive 0..SMP-1; set empty to disable pinning.
+#CPUPIN=0-3
+
+# MTGPU vGPU (optional).  Set ENABLE_GPU=0 to run without it.
+#ENABLE_GPU=0
+#MDEV_TYPE=mt-igpu-0000
+#MDEV_PARENT=/sys/class/mdev_bus/MGPU0001:00
+
+# user whose X/Wayland session the viewer is shown in
+UID_DESKTOP=1000
+DISPLAY_NUM=:0

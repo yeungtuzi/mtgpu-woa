@@ -1,0 +1,14 @@
+[Unit]
+Description=winvm private D-Bus for the QEMU dbus display
+After=network.target
+
+[Service]
+Type=simple
+RuntimeDirectory=winvm-dbus
+RuntimeDirectoryPreserve=yes
+UMask=0000
+ExecStart=/usr/bin/dbus-daemon --config-file=/etc/dbus-1/winvm.conf --nofork --nopidfile
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,4 @@
+*.o
+*.bak
+/bin/winvm-viewer
+__pycache__/
