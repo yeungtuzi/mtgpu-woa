@@ -164,6 +164,32 @@ VM 没在跑时「显示 Windows 窗口」是灰的，得先点「启动」。
 
 控制面板是**可选**的——所有操作都能用命令行完成，托盘只是把常用几条放在手边。
 
+## 启动画面（KDE 欢迎画面 / Splash）
+
+`share/plasma/look-and-feel/org.aibook.splash/` 是一个 KDE Plasma 6 的欢迎画面主题：
+
+- 纯黑背景，兔子图标居中，宽度约为屏幕的 **1/4**（`width/4`，同时不超过 `height/2`）
+- 边框四角的颜色（绿 / 黄 / 红 / 蓝）按顺序从灰色中点亮，2.8 秒一个循环
+- 兔子本身不动：动画只叠加四个「只保留一角彩色边框」的整图精灵，
+  耳朵尖（探进右上角的那一段）属于灰色底图，不会被动画波及
+
+![aibook 启动画面](docs/splash-aibook.gif)
+
+安装（用户级，不需要 root）：
+
+```bash
+./scripts/install-splash.sh
+# 系统级：sudo ./scripts/install-splash.sh --system
+```
+
+然后在 **系统设置 → 全局主题 → 欢迎画面** 里选择 **aibook**。
+
+素材从 `share/icons/mtgpu-woa-512.png` 生成（饱和度选区 + 四象限切分）：
+
+```bash
+python3 tools/gen-splash-assets.py 720
+```
+
 ## 使用
 
 ```sh
@@ -288,7 +314,11 @@ guest/qemu-ga/            qemu-ga for Windows ARM64 及依赖、许可证
 guest/winvm-agent.ps1     可选的 guest 会话助手
 bench/                    浏览器 2D/3D 基准页与结果收集
 dist/                     预编译 FreeRDP deb
-share/                    项目图标
+share/icons/              项目图标（512 原图即启动画面素材）
+share/plasma/look-and-feel/org.aibook.splash/
+                          KDE 欢迎画面主题（黑底兔子，边框轮流点亮）
+tools/gen-splash-assets.py 从 512 图标生成启动画面素材
+scripts/install-splash.sh  安装欢迎画面主题
 docs/                     安装指南、架构、基准数据（中英双语）
 docs/images/              发布用截图
 ```

@@ -1,5 +1,15 @@
 # 更新记录
 
+## 未发布
+
+### 新增
+
+- **KDE 欢迎画面主题 `aibook`**（`share/plasma/look-and-feel/org.aibook.splash`）：
+  纯黑背景、兔子图标居中约占屏宽 1/4，边框四角颜色按绿→黄→红→蓝
+  从灰色中依次点亮并循环；耳朵尖区域不受动画影响。
+  安装：`./scripts/install-splash.sh`，随后在
+  **系统设置 → 全局主题 → 欢迎画面** 选择 `aibook`。
+
 ## 1.0 (2026-11-06)
 
 **主题：用 GPU 编解码器实现 RemoteFX 原生支持，性能相比原来的 viewer 大幅提升。**
