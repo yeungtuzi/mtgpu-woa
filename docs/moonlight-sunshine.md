@@ -159,3 +159,15 @@ scripts/build-sunshine-guest.ps1
 - **双向剪贴板**：upstream Sunshine 的剪贴板是 client→host；host→client/双向需 Foundation Sunshine
   （其 ARM64 源码构建因 MinHook 缺失、无 mediafoundation 编码器而未采用）或额外桥接；本轮未验证通过。
 - QGA 的 PowerShell 在 session 0，读不到用户会话剪贴板，后续剪贴板测试建议在 GUI 内做。
+
+## 剪贴板与麦克风（2026-11-15 17:00 更新）
+
+- **剪贴板（upstream 只支持 client→host）**：
+  - Moonlight 窗口内按 `Ctrl+Alt+Shift+V` 把客户端剪贴板文本发到 host（Sunshine 侧写入 guest 剪贴板）；
+  - **host→client 没有实现**（见 Sunshine issue #1539、moonlight-qt issue #1056），因此“双向”不成立；
+  - 本轮实测：guest 端设置剪贴板不会同步到宿主，宿主设置也不会到 guest，与 upstream 行为一致；
+  - 尝试过自建 HTTP 桥（宿主 `xclip` + guest session 1 WinForms 轮询），guest 端 `Clipboard` 调用会被挂起的剪贴板持有者阻塞，已放弃并清理相关任务。
+- **麦克风**：Moonlight VPlus 的麦克风开关是 GUI 设置（本 build 的 CLI 没有 `--mic`），Sunshine 2026 有 `mic_wasapi_t`；
+  headless 无法验证，需要在 Moonlight GUI 中开启后看 Sunshine 日志。
+- 结论：要做到“双向剪贴板”，需要 Foundation Sunshine（ARM64 源码构建受 MinHook 缺失/无 mediafoundation 限制）
+  或同时给 Sunshine + Moonlight 加 host→client 剪贴板协议支持，超出本轮范围，目标保持 active。
