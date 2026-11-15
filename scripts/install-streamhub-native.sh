@@ -25,10 +25,25 @@ sudo chown -R "$(id -u):$(id -g)" "$dest"
 
 cat > "$dest/streamhub-native.sh" <<'SH'
 #!/usr/bin/env bash
-# Launcher: use the desktop session's Qt (KDE6 prefix) and let Qt pick the
-# platform plugin (Wayland on Wayland sessions, xcb on X11) so system scaling
-# and fractional HiDPI are respected.
+# Launcher: use the desktop session's Qt (KDE6 prefix) and prefer Wayland when
+# the session provides it, so Qt reads the compositor's scale factor (HiDPI).
+# Falls back to xcb automatically (QT_QPA_PLATFORM="wayland;xcb").
 set -euo pipefail
+uid=$(id -u)
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$uid}"
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+fi
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    for sock in "$XDG_RUNTIME_DIR"/wayland-*; do
+        [ -S "$sock" ] || continue
+        export WAYLAND_DISPLAY="$(basename "$sock")"
+        break
+    done
+fi
+if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland;xcb}"
+fi
 if [ -f /opt/kde6/env.sh ]; then
     # shellcheck disable=SC1091
     source /opt/kde6/env.sh
