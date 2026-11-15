@@ -411,7 +411,11 @@ def stream_stats() -> dict[str, Any]:
     m_de = re.search(r"([\d.]+)\s*(?:\{\d+\})?\s*De", text)
     m_rd = re.search(r"([\d.]+)\s*(?:\{\d+\})?\s*Rd", text)
     m_bw = re.search(r"Bandwidth\s+\**([\d.]+)\**\s*(?:\{16\})?\s*Mbps", text)
-    m_lat = re.search(r"Render\s+\**([\d.]+)\**ms\s*·\s*Decode\s+\**([\d.]+)\**ms\s*·\s*Encode\s+\**([\d.]+)\**ms", text)
+    # Parse these independently: Moonlight omits Encode entirely when Sunshine
+    # has not reported host-processing latency (framesWithHostProcessingLatency=0).
+    m_render = re.search(r"Render\s+\**([\d.]+)\**ms", text)
+    m_decode = re.search(r"Decode\s+\**([\d.]+)\**ms", text)
+    m_encode = re.search(r"Encode\s+\**([\d.]+)\**ms", text)
     m_net = re.search(r"Network\s+\**(\d+)\**\s*±\s*(\d+)ms", text)
     m_loss = re.search(r"Loss\s+([\d.]+)%", text)
 
@@ -423,18 +427,24 @@ def stream_stats() -> dict[str, Any]:
 
     fps = f(m_fps, 1); rx = f(m_rx, 1); de = f(m_de, 1); rd = f(m_rd, 1)
     bw = f(m_bw, 1)
-    render = f(m_lat, 1); decode = f(m_lat, 2); encode = f(m_lat, 3)
+    render = f(m_render, 1); decode = f(m_decode, 1); encode = f(m_encode, 1)
     net = f(m_net, 1)
     loss = f(m_loss, 1)
-    parts = [v for v in (encode, render, decode, net) if v is not None]
-    latency = round(sum(parts), 1) if parts else None
-    ok = any(v is not None for v in (fps, bw, encode))
+    # End-to-end latency is only meaningful when every component exists.
+    # Otherwise show "--"; never present network-only 1ms as total latency.
+    latency = None
+    if all(v is not None for v in (encode, render, decode, net)):
+        latency = round(encode + render + decode + net, 1)
+    missing = [name for name, v in (("encode", encode), ("render", render),
+                                    ("decode", decode), ("network", net))
+               if v is None]
+    ok = any(v is not None for v in (fps, bw, render, decode, encode))
     return {
         "ok": ok, "running": True,
         "fps": fps, "rx": rx, "de": de, "rd": rd,
         "bandwidth": bw, "render": render, "decode": decode,
         "encode": encode, "network": net, "loss": loss,
-        "latency": latency,
+        "latency": latency, "missing": missing,
     }
 
 

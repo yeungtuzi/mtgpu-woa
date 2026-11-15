@@ -162,7 +162,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build-sunshine-guest.ps1
 ### 统计口径
 
 - **码率**：Moonlight 统计里的 Bandwidth。
-- **延迟**：Encode + Render + Decode + Network 之和。
+- **延迟**：Encode + Render + Decode + Network 之和；四项缺一（例如 Sunshine 未上报编码延迟）就显示 `—`，不会用网络延迟冒充总延迟。
 - **串流帧率**：客户端接收/渲染管线的 fps；**不是屏幕实际呈现帧率**。
 - 主界面显示的是串流帧率；host 屏幕刷新率只作为脚注，避免把 150+ 的管线数字误当成显示帧率。
 

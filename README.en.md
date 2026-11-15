@@ -126,7 +126,8 @@ bandwidth, not encode latency.
 ### Stats
 
 - **Bandwidth**: Moonlight Bandwidth.
-- **Latency**: Encode + Render + Decode + Network.
+- **Latency**: Encode + Render + Decode + Network. If any component is missing (e.g. Sunshine
+  does not report encode latency), the UI shows `—` instead of passing network latency off as total.
 - **Stream FPS**: client receive/render pipeline FPS, **not** the panel's presented frame rate.
   The host refresh rate is only a footnote.
 

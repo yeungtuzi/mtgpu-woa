@@ -420,6 +420,15 @@ ApplicationWindow {
                 }
 
                 Text {
+                    visible: stats.ok && (stats.encode === null || stats.encode === undefined)
+                    Layout.fillWidth: true
+                    text: "Sunshine 未上报编码延迟，端到端延迟暂不可用；不会把网络延迟当成总延迟。"
+                    color: "#fbbf24"
+                    font.pixelSize: 9
+                    wrapMode: Text.WordWrap
+                }
+
+                Text {
                     Layout.fillWidth: true
                     text: displayHz > 0
                           ? ("guest 采集 / Moonlight 渲染 " + cfg.fps + "fps；host 屏幕 " + Math.round(displayHz) + "Hz，实际呈现由合成器限制。")
