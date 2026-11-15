@@ -1,167 +1,221 @@
 # mtgpu-woa
 
-**Version: v1.0** ([changelog](CHANGELOG.md)) · **[中文说明](README.md)**
+**Windows 11 ARM64 on KVM/QEMU, accelerated by a Moore Threads M1000 vGPU and streamed to the
+Linux host through native Moonlight + Sunshine.**
 
-**mtgpu-woa** = *Moore Threads GPU + Windows on ARM*.
+The rabbit tray owns VM power/state and the four-state icon. The **Stream Console**
+(Qt 6 / QML native window) owns stream start/stop, runtime fullscreen, bandwidth/latency/FPS
+and settings.
 
-Run a **Windows 11 ARM64** virtual machine on upstream **QEMU** with
-GPU-accelerated rendering and no proprietary components. Display goes over
-**RDP with RemoteFX**: the guest encodes with the GPU's hardware encoder (AVC444)
-and the host decodes in hardware.
+Version `0.1.1` · [Changelog](CHANGELOG.md) · **[中文说明](README.md)** · [Install guide](docs/INSTALL.md)
 
-## Highlights
-
-* **RemoteFX through the GPU codec** — the guest encodes in hardware (AVC444),
-  the host decodes in hardware.
-* **Works with any RDP client that supports RemoteFX (AVC444)** — Windows App,
-  mstsc, Remmina, or the FreeRDP build we ship.
-* **Clipboard, audio, dynamic resolution, drive redirection, IME and multiple
-  monitors come from the protocol** instead of being reimplemented here.
-* **Tray control panel** — start the VM in the background, pause/resume, and pull
-  the RDP window back when you want it. It never steals focus on its own.
-* **qemu-ga integration** — soft shutdown/reboot go through the guest agent;
-  only hard power operations touch QEMU directly.
-
-## Screenshots
-
-All taken from a real RDP client on the host, 1920×1080:
-
-| Desktop | 1080p video |
-|---|---|
-| ![desktop](docs/images/desktop.png) | ![video](docs/images/video.png) |
-
-| WebGL 3D | Control panel |
-|---|---|
-| ![webgl](docs/images/webgl.png) | ![panel](docs/images/panel.png) |
+> The native Moonlight/Sunshine path is the current default. The legacy RDP/FreeRDP path is
+> still in the tree but is not the default interaction model and is outside this README's scope.
 
 ## Architecture
 
 ```
-        host (ARM64 Linux)                     Windows 11 ARM64 guest
-  ┌─────────────────────────────┐        ┌────────────────────────────┐
-  │ qemu-system-aarch64 (stock) │        │ TermService (RDP)          │
-  │   virtio-blk / virtio-net   │───────►│ viostor / netkvm           │
-  │   virtio-serial             │───────►│ qemu-ga                    │
-  │   vfio-pci (M1000 mdev)     │───────►│ M1000 vGPU driver          │
-  │ -display dbus (fallback)    │──► D-Bus socket                     │
-  │ -qmp unix:…sock             │──► QMP (power / pause / status)     │
-  └─────────────────────────────┘        └───────────────┬────────────┘
-                                                          │ TCP 3389
-                                                          │ RDP + RemoteFX
-                                                          │ AVC444 (GPU encode)
-  ┌─────────────────────────────┐                         │
-  │ host FreeRDP 3 (GPU decode) ◄─────────────────────────┘
-  │ winvm launcher · tray panel │
-  └─────────────────────────────┘
+Host: Ubuntu 24.04 ARM64 / KDE Plasma 6 Wayland
+  rabbit tray ── winvm start/stop/restart/pause ─────────────┐
+       │ "Show console"                                      ▼
+  Stream Console (Qt6/QML) ── FastAPI :8760 ── Moonlight V+ ── QEMU/KVM + MT vGPU
+       │ bandwidth/latency/FPS/fullscreen                      │ localhost
+       └──────────────────────────────────────────────────────┼──────────────┐
+                                                              ▼              │
+                                                Windows 11 ARM64 guest        │
+                                                Sunshine (source build)       │
+                                                MT H.264 MFT / QGA / audio    │
 ```
+
+- Video: Sunshine encodes with the MT VPU H.264 MFT; Moonlight V+ decodes/renders on the host.
+- Control: the backend drives Moonlight CLI and QEMU; QGA/QMP provide guest power and state.
+- Audio uses the native Moonlight/Sunshine channel. Two-way clipboard is an optional text bridge.
+
+## Features
+
+- Native Qt 6/QML console; no Chrome/Electron.
+- Rabbit tray: start/stop/restart Windows, pause/resume, four-state icon, show console, logs.
+- Single instance: opening the console again raises the existing window; closing it stops
+  polling and exits.
+- Three presets: powersave 30fps, balanced 60fps (default), low-latency 120fps.
+- Runtime fullscreen without reconnecting (EWMH; `Ctrl+Alt+Shift+F` also works).
+- Real stats: bandwidth, end-to-end latency (encode + render + decode + network), stream FPS.
+- Lightweight guest: hidden Sunshine console, `min_log_level=error`, QGA `guest-exec` fixed.
 
 ## Requirements
 
-**Host**
+| Where | Requirement |
+|---|---|
+| Host | Ubuntu 24.04 ARM64, KVM, KDE Plasma 6 Wayland (StatusNotifierItem tray) |
+| Host | QEMU 8.2.2, Qt 6, FFmpeg 6.x, SDL2, libplacebo; Moonlight V+ source build |
+| Host | Moore Threads M1000 vGPU driver + mdev/vfio (**proprietary, not in this repo**) |
+| Guest | Windows 11 ARM64 image/license (bring your own), virtio drivers |
+| Guest | MSYS2 CLANGARM64 + CMake/Ninja + Node.js ARM64 for the Sunshine source build |
+| Network | Everything on loopback; QEMU forwards Sunshine ports to 127.0.0.1 |
 
-* ARM64 Linux. Tested on **Ubuntu 24.04.4 LTS, kernel 7.0.14**, KDE Plasma 6 /
-  Wayland (the machine ships with AIOS; the desktop was replaced with KDE 6 —
-  see <https://github.com/yeungtuzi/mtgpu-kde>)
-* QEMU ≥ 8.2 (8.2.2 from the distro was used; the RDP path does not need D-Bus
-  display, only the fallback viewer does)
-* FreeRDP 3 **built with GFX/H.264** — the distro package is `WITH_GFX_H264=OFF`
-  and cannot decode AVC444. A prebuilt deb is attached to the release.
-* KDE Plasma 6 or GNOME, Wayland or X11
-* PipeWire or PulseAudio
-* Optional: Moore Threads M1000 GPU plus its host driver (provides the mdev)
+No MT vGPU/MFT means no hardware encoding. Windows, the MT driver and PES tooling must be
+obtained legally by the user.
 
-**Guest**
+## Quick start
 
-* Windows 11 ARM64
-* Official [virtio-win](https://github.com/virtio-win/virtio-win-pkg-scripts)
-  drivers: `viostor` (disk), `netkvm` (network); `viogpudo` only for the fallback
-  display path
-* The installer enables Remote Desktop, turns on RemoteFX/AVC444 and lifts the
-  default 30 Hz frame cap
+### Host
 
-## Install
+```bash
+git clone https://github.com/yeungtuzi/mtgpu-woa.git
+cd mtgpu-woa
 
-Full steps and troubleshooting: **[docs/INSTALL.md](docs/INSTALL.md)** (Chinese).
-Three commands:
-
-```sh
-# 1) host: launcher, tray panel, icons, autostart, and the AVC444-capable FreeRDP
-tar xzf winvm-host-1.0.tar.gz -C /tmp/winvm-host && sudo /tmp/winvm-host/install-host.sh
-
-# 2) guest: after Windows + virtio drivers, in an elevated PowerShell
-.\install-guest.ps1 -WithAgent
-
-# 3) host: set the password and start
-sudo sed -i 's/^RDP_PASS=.*/RDP_PASS=yourpassword/' /etc/winvm.conf && sudo winvm start
+sudo ./scripts/install-host.sh          # QEMU launcher / rabbit tray / autostart
+./scripts/build-moonlight-host.sh       # Moonlight V+ -> /opt/mtgpu-woa/moonlight
+sudo ./scripts/install-streamhub.sh     # FastAPI backend + legacy web client
+sudo ./scripts/install-streamhub-native.sh  # native Qt6 console
 ```
 
-## Control panel
+`install-host.sh` also checks the legacy FreeRDP client; the native path does not use it.
 
-The tray icon colour is the state: **black** = powered off, **green** = running,
-**red** = fault, **amber** = paused. The menu offers status, start, stop, restart,
-pause/resume, *Show Windows window* (brings the RDP client back and logs in),
-view log, quit.
+### Guest
 
-Nothing auto-reconnects: the VM keeps running in the background and you decide
-when to bring the window back. *Show Windows window* is greyed out while the VM
-is not running — start it first.
+Install Windows 11 ARM64 and the virtio drivers, copy `scripts/` and `guest/qemu-ga/` into the
+guest, then from an Administrator PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/install-guest.ps1
+powershell -ExecutionPolicy Bypass -File scripts/build-sunshine-guest.ps1
+```
+
+Sunshine lands in `C:\mtgpu-woa\sunshine-built\sunshine.exe`; the scheduled task
+`sun-standalone` starts it hidden. See [scripts/guest/sunshine/README.md](scripts/guest/sunshine/README.md).
+
+### First pairing
+
+1. Open the Sunshine Web UI at `https://127.0.0.1:47990` and set credentials.
+2. Add `127.0.0.1` once in the Moonlight GUI and enter the PIN from Sunshine.
+3. Afterwards the console reuses the pairing through Moonlight CLI.
+
+### Run
+
+- Tray → **Start Windows** (starts QEMU only).
+- Tray → **Show console**.
+- Pick an app → **Start stream**; toggle **Fullscreen** at runtime.
+- Closing the console exits it and stops polling; the tray stays available.
 
 ## Usage
 
-```sh
-sudo winvm start | show | status | pause | resume | reboot | stop
-sudo winvm res 1920x1080
+### Modes
+
+| Preset | Resolution | FPS | Bitrate | Notes |
+|---|---|---|---|---|
+| Powersave | 1280×720 | 30 | 15 Mbps | lowest load |
+| Balanced (default) | 1600×900 | 60 | 25 Mbps | desktop/video |
+| Low latency | 1440×900 | 120 | 30 Mbps | more responsive, higher VPU/CPU |
+
+The guest helper updates Sunshine's manual refresh rate when the target FPS changes. The
+virtual display may overshoot; excess frames are dropped. Bitrate mostly affects quality and
+bandwidth, not encode latency.
+
+### Stats
+
+- **Bandwidth**: Moonlight Bandwidth.
+- **Latency**: Encode + Render + Decode + Network.
+- **Stream FPS**: client receive/render pipeline FPS, **not** the panel's presented frame rate.
+  The host refresh rate is only a footnote.
+
+### Fullscreen
+
+The console button (or `Ctrl+Alt+Shift+F`) toggles `_NET_WM_STATE_FULLSCREEN` on the Moonlight
+window via EWMH, without restarting the stream. The tray no longer launches Moonlight directly.
+
+### Audio / clipboard
+
+Audio uses the native Moonlight/Sunshine channel. Two-way text clipboard is a separate bridge
+(~1.5s, text only): [scripts/guest/clipboard/README.md](scripts/guest/clipboard/README.md).
+
+## Configuration
+
+```bash
+sudo cp winvm.conf.example /etc/winvm.conf
+sudoedit /etc/winvm.conf
 ```
 
-Verified over RDP: AVC444 hardware encoding, audio redirection, bidirectional
-clipboard, drive redirection, dynamic resolution, Chinese IME, qemu-ga soft
-shutdown/reboot.
+Key entries: `IMG`/`VARS`, `MEM`/`SMP`, `ENABLE_GPU`/`MDEV_TYPE`/`MDEV_PARENT`, `SUNSHINE_FWD`.
+`MODE=viewer` is the default; `rdp` is the legacy path.
 
-**The desktop is bound to `127.0.0.1` by default.** To reach it from another
-machine, set `RDP_BIND=0.0.0.0` in `/etc/winvm.conf`.
+Logs:
 
-## Performance
-
-Measured at 1920×1080 with a real RDP client on the host:
-
-| Scene | Frame rate |
+| Log | Path |
 |---|---|
-| WebGL 3D (240 triangles, vertex-shader animation) | 65.6 fps |
-| 1080p / 30 fps video | 29.4 fps (tracks the source) |
-| Idle desktop | matches the 60 Hz refresh rate |
+| Moonlight stats | `/opt/mtgpu-woa/moonlight/streamhub-stats.log` |
+| Console backend | `/opt/mtgpu-woa/streamhub/streamhub.log` |
+| QEMU / tray | `/tmp/winvm-qemu.log`, `/tmp/winvm-tray.log` |
+| Guest Sunshine | hidden console; `min_log_level=error` (use `info` for debugging) |
 
-These are **what reaches the screen**, not what the GPU can render — just like a
-60 Hz monitor caps what you see from a much faster card. The rendering itself
-happens on the vGPU and runs well ahead of that pace; the numbers above describe
-the experience ceiling. Higher resolutions cost more encoding and lower the
-rate, which `winvm res` can trade off.
+## How it works
 
-Harness: `bench/rafvid.html` (video + WebGL + rAF counting) and
-`bench/benchserver.py` (result collection). The 30 Hz ceiling people hit is
-Windows' own RDP throttle (fixed in the guest installer), not a GPU limitation.
+- Moonlight V+ patch `vendor/patches/moonlight-qt/0002-streamhub-stats.patch` logs
+  `StreamHub stats` to stderr once per second.
+- FastAPI backend `apps/streamhub/backend/app.py` exposes `/api/stream`,
+  `/api/stream/fullscreen`, `/api/stream/stats`, `/api/settings`, `/api/vm` on `127.0.0.1:8760`.
+- Qt console `apps/streamhub-native/`; `QLocalServer` provides single-instance behavior.
+- Guest MFT proxy `scripts/guest/mft/` adapts the MT async MFT for Sunshine.
+- QGA bundle `guest/qemu-ga/` includes the Windows ARM64 binary and GLib spawn helper.
+- `scripts/guest/set-sunshine-fps.sh` applies the per-preset refresh rate.
 
-Older measurements from the pre-RDP display path live in the git history and
-the earlier releases.
+## Project layout
+
+```
+apps/streamhub-native/     Qt6/QML console
+apps/streamhub/            FastAPI backend + legacy web client
+host/winvm-tray.py         rabbit tray
+bin/winvm                  QEMU launcher / QMP+QGA wrapper
+guest/qemu-ga/             Windows ARM64 qemu-ga + GLib helper
+scripts/                   host/guest install, Moonlight/Sunshine builds, patches
+scripts/guest/mft/         MT MFT sync proxy
+scripts/guest/clipboard/   two-way text clipboard bridge
+vendor/                    third-party sources, patches, licenses, source offer
+docs/                      install, latency tuning, architecture
+```
 
 ## Security
 
-Keep the RDP endpoint local as described above; that is the only network-facing
-piece of the setup.
+- Backend and Sunshine/Moonlight ports bind loopback only. Do not expose them publicly.
+- Set a strong Sunshine Web UI password; do not reuse example credentials.
+- Windows, MT drivers and PES are proprietary and must be supplied by the user.
 
-## Layout
+## Troubleshooting
 
-```
-bin/winvm                 launcher (RDP first, reads /etc/winvm.conf)
-host/winvm-tray.py        control panel (tray, four-state icon)
-host/icons/               tray icons (black/green/red/amber)
-scripts/install-host.sh   one-shot host install (includes the FreeRDP deb)
-scripts/install-guest.ps1 one-shot guest install (RDP + RemoteFX + qemu-ga)
-guest/qemu-ga/            qemu-ga for Windows ARM64, dependencies, licences
-bench/                    browser 2D/3D benchmarks
-dist/                     prebuilt FreeRDP deb
-docs/                     install guide, architecture notes (zh + en)
-```
+| Symptom | Check |
+|---|---|
+| No tray icon | StatusNotifierItem: KDE native; GNOME needs the AppIndicator extension |
+| No picture | QEMU running? Sunshine reachable? Check `/tmp/winvm-qemu.log` and backend log |
+| Low/30fps stream | Sunshine `minimum_fps_target`, guest refresh rate; see [docs/latency-tuning.md](docs/latency-tuning.md) |
+| Fullscreen glitches / taskbar flashing | Use the console's fullscreen, not a direct tray-launched Moonlight |
+| Frozen picture after changing Windows resolution | Do not change it inside Windows; use the console settings |
+| Guest black console / log spam | Sunshine is hidden via VBS with `min_log_level=error`; check other debug shells |
+| Console still polling after close | Current builds exit on close; check for stale instances |
+| Clipboard/audio issues | Audio is native; clipboard is a text-only bridge |
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+Original code is **Apache-2.0** ([LICENSE](LICENSE)). Third-party components keep their own
+licenses and are aggregated, not relicensed:
+
+| Component | License |
+|---|---|
+| Moonlight V+, Sunshine (with our patches) | GPL-3.0 |
+| QEMU / QEMU Guest Agent | GPL-2.0 |
+| FreeRDP (legacy path) | Apache-2.0 |
+| Qt 6 / KDE Frameworks / GLib / libplacebo | LGPL-3.0 / LGPL-2.1-or-later |
+| SDL2 | zlib |
+
+- Manifest, patches, full license texts: [vendor/SOURCES.md](vendor/SOURCES.md),
+  [vendor/README.md](vendor/README.md).
+- GPL/LGPL source offer: [vendor/SOURCE-OFFER.md](vendor/SOURCE-OFFER.md).
+- QEMU is unmodified and not redistributed; QEMU/Qt/KDE/FFmpeg/SDL2/libplacebo come from the distro.
+- Proprietary: MT VPU driver/MFT, Windows 11 ARM64 image, PES/MT tooling; see
+  [vendor/PROPRIETARY.md](vendor/PROPRIETARY.md).
+
+## Known limitations
+
+- Guest virtual-display refresh/capture may not exactly match the target; frames can be dropped.
+- Sunshine is source-built; the ARM64 Web UI may need the official `assets/web` fallback.
+- Hardware encoding depends on the proprietary MT driver/MFT.
+- The legacy RDP/FreeRDP path remains but is not the default or covered by this README's validation.
