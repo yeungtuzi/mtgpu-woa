@@ -6,7 +6,7 @@
 兔头托盘负责虚拟机电源、状态与四色图标；**串流控制台**（Qt 6 / QML，原生窗口）
 负责开始/停止串流、运行中全屏切换、码率/延迟/帧率与设置。
 
-版本：`0.1.1` · [更新记录](CHANGELOG.md) · [English](README.en.md) · [安装指南](docs/INSTALL.md)
+版本：`0.1.1` · [更新记录](CHANGELOG.md) · [English](README.en.md)
 
 > 当前主线是 **Moonlight + Sunshine 原生串流**。仓库里仍保留 RDP/FreeRDP 历史路径，
 > 但它不再是默认交互方式；本 README 只描述当前主线。

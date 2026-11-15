@@ -7,7 +7,7 @@ The rabbit tray owns VM power/state and the four-state icon. The **Stream Consol
 (Qt 6 / QML native window) owns stream start/stop, runtime fullscreen, bandwidth/latency/FPS
 and settings.
 
-Version `0.1.1` · [Changelog](CHANGELOG.md) · **[中文说明](README.md)** · [Install guide](docs/INSTALL.md)
+Version `0.1.1` · [Changelog](CHANGELOG.md) · **[中文说明](README.md)**
 
 > The native Moonlight/Sunshine path is the current default. The legacy RDP/FreeRDP path is
 > still in the tree but is not the default interaction model and is outside this README's scope.
