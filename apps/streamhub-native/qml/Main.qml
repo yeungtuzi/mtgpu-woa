@@ -408,23 +408,16 @@ ApplicationWindow {
 
                 Text {
                     Layout.fillWidth: true
-                    text: stats.ok
-                          ? ("编码 " + (stats.encode !== null ? stats.encode.toFixed(1) : "—") +
-                             " ms · 渲染 " + (stats.render !== null ? stats.render.toFixed(1) : "—") +
-                             " ms · 解码 " + (stats.decode !== null ? stats.decode.toFixed(2) : "—") +
-                             " ms · 网络 " + (stats.network !== null ? stats.network.toFixed(0) : "—") + " ms")
-                          : (streamRunning ? "等待串流统计…" : "启动串流后显示实时码率/延迟/帧率")
+                    text: {
+                        if (!stats.ok || stats.latency === null || stats.encode === null ||
+                            stats.render === null || stats.decode === null || stats.network === null)
+                            return "暂无统计数据"
+                        return "编码 " + stats.encode.toFixed(1) + " ms · 渲染 " +
+                               stats.render.toFixed(1) + " ms · 解码 " + stats.decode.toFixed(2) +
+                               " ms · 网络 " + stats.network.toFixed(0) + " ms"
+                    }
                     color: "#5f7280"
                     font.pixelSize: 10
-                    wrapMode: Text.WordWrap
-                }
-
-                Text {
-                    visible: stats.ok && (stats.encode === null || stats.encode === undefined)
-                    Layout.fillWidth: true
-                    text: "Sunshine 未上报编码延迟，端到端延迟暂不可用；不会把网络延迟当成总延迟。"
-                    color: "#fbbf24"
-                    font.pixelSize: 9
                     wrapMode: Text.WordWrap
                 }
 
