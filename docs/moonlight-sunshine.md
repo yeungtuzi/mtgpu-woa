@@ -97,3 +97,35 @@ scripts/build-sunshine-guest.ps1
 - [ ] 托盘面板从 xfreerdp 切换到 Moonlight
 - [ ] 双向音频/剪贴板联调
 - [ ] 源码/脚本纳入仓库发布
+
+## 当前状态（2026-11-15 16:20）
+
+### 已打通
+- 宿主 Moonlight VPlus 6.2.84 源码构建完成：`/opt/mtgpu-woa/moonlight/bin/moonlight`
+- guest Sunshine ARM64 2026.914 以**服务模式**运行（SunshineService），Web UI `https://127.0.0.1:47990`
+  （账号 `admin` / `Winvm!2026`，可用 `curl -k -u admin:... https://127.0.0.1:47990/api/pin` 管理配对）
+- 配对完成：`moonlight pair 127.0.0.1 --pin 1234`，应用列表含 `Desktop` / `Steam Big Picture`
+- 串流验证：1080p60 / 20 Mbps，宿主 VAAPI 硬解正常，guest 侧音频采集 `F32 48000 2.0`
+- `winvm` 已加 Sunshine 端口转发（TCP 47984/47989/47990/48010，UDP 47998/47999/48000/48002/48010），
+  `/etc/winvm.conf` 配置 `MODE=rdp` + `CLIENT=moonlight`，tray 的“启动/显示”会拉起 Moonlight
+
+### 已知限制 / 阻塞
+- **编码器是 software（libx264），MT VPU 硬件编码未打通**：
+  - MT 的 H.264 MFT 注册在 NVIDIA CLSID 下，实测 `MF_TRANSFORM_ASYNC=1`（异步），
+    输入 NV12/IYUV/YV12/YUY2、输出 H264；FFmpeg `h264_mf`（Sunshine 的 mediafoundation 路径）
+    在 `-hw_encoding 1` 下永久挂起（frame=0）
+  - 同步代理 MFT 会被 FFmpeg 以 “hardware MFT is not async” 拒绝；异步门面代理能通过检查并
+    `ProcessInput` 成功，但 MT MFT 的 HaveOutput 事件时序与 FFmpeg 异步状态机不匹配，仍会卡住
+  - 调研与实验代码：`scripts/guest/mft/`（probe / async harness / 代理 + README）
+  - 可行后续：给 Sunshine 写原生 MT MFT 编码器（直接按 async 事件驱动，参考 `mftasync.cpp`），
+    或给 FFmpeg `libavcodec/mfenc.c` 打补丁（ProcessInput 后轮询 ProcessOutput 而不是死等 HaveOutput）
+- Foundation Sunshine（双向剪贴板 + 麦克风）在 ARM64 上源码构建失败：缺少 MinHook（CLANGARM64 无包），
+  且其编码器表只有 nvenc/quicksync/amdvce/software，没有 mediafoundation；暂不采用
+- upstream Sunshine 的剪贴板只支持 client→host；**双向剪贴板**需要 Foundation 或额外桥接
+- 麦克风：upstream 2026 版已有 `mic_wasapi_t`，需要在 Moonlight VPlus 里开启麦克风实测
+
+### 回滚
+- 磁盘快照 `pre-moonlight-20261115`（`sudo qemu-img snapshot -l /home/lf/woa-hist.qcow2`）
+- MFT 注册备份 `C:\mtgpu-woa\mt-mft-clsid-backup.reg`，当前已恢复为 `C:\mtgpu-woa\mtmft13.dll`
+- Sunshine 配置 `C:\Program Files\Sunshine\config\sunshine.conf`（当前 `encoder = software`）
+- 旧的 `config.bak` 保留在 `C:\Program Files\Sunshine\config.bak`

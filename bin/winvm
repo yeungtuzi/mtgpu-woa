@@ -45,6 +45,12 @@ CONF=${WINVM_CONF:-/etc/winvm.conf}
 # 优先用自编译的 FreeRDP（系统包版本 WITH_GFX_H264=OFF，解不了 AVC444）
 : "${RDP_CLIENT:=}"
 : "${RDP_PASS:=}"
+# Sunshine/Moonlight：Moonlight 客户端需要的端口（TCP 控制/配对 + UDP 音视频/输入）
+# 全部转发到 127.0.0.1，Moonlight 在宿主上连 127.0.0.1 即可。
+: "${SUNSHINE_FWD:=hostfwd=tcp:127.0.0.1:47984-:47984,hostfwd=tcp:127.0.0.1:47989-:47989,hostfwd=tcp:127.0.0.1:47990-:47990,hostfwd=tcp:127.0.0.1:48010-:48010,hostfwd=udp:127.0.0.1:47998-:47998,hostfwd=udp:127.0.0.1:47999-:47999,hostfwd=udp:127.0.0.1:48000-:48000,hostfwd=udp:127.0.0.1:48002-:48002,hostfwd=udp:127.0.0.1:48010-:48010}"
+# 显示客户端：moonlight = Moonlight VPlus（默认）；rdp = FreeRDP（旧路径，保留兜底）
+: "${CLIENT:=moonlight}"
+: "${MOONLIGHT_BIN:=/opt/mtgpu-woa/moonlight/bin/moonlight}"
 # 启动后自动切到的 guest 分辨率（空 = 不动）
 : "${START_RES:=1920x1080}"
 # 显示通道：rdp = Windows 自带远程桌面（默认）；viewer = D-Bus + 自带窗口（兜底）。
@@ -233,7 +239,7 @@ start() {
     "${fw[@]}" \
     -drive file="$IMG",if=none,id=hd0,format=qcow2,cache=writeback \
     -device virtio-blk-pci,drive=hd0,addr=0xa \
-    -nic type=user,model=virtio,hostfwd=tcp:127.0.0.1:"$AGENT_PORT"-:"$AGENT_PORT",hostfwd=tcp:"$RDP_BIND":"$RDP_PORT"-:3389 \
+    -nic type=user,model=virtio,hostfwd=tcp:127.0.0.1:"$AGENT_PORT"-:"$AGENT_PORT",hostfwd=tcp:"$RDP_BIND":"$RDP_PORT"-:3389${SUNSHINE_FWD:+,$SUNSHINE_FWD} \
     -device qemu-xhci,addr=0x7 \
     -chardev socket,path="$QGA_SOCK",server=on,wait=off,id=qga0 \
     -device virtio-serial-pci,addr=0x8 \
@@ -262,9 +268,13 @@ start() {
   echo "started: qemu=$(cat /tmp/winvm-qemu.pid 2>/dev/null)${u:+ mdev=$u}"
   sleep 3
   agent_check
-  # RDP 必须等 guest 起来之后再连，否则客户端连不上会直接退出
+  # 客户端必须等 guest 起来之后再连，否则连不上会直接退出
   if [ "$MODE" = rdp ]; then
-    rdp_start "$auth"
+    if [ "${CLIENT:-moonlight}" = moonlight ] && [ -x "$MOONLIGHT_BIN" ]; then
+      moonlight_start "$auth"
+    else
+      rdp_start "$auth"
+    fi
   fi
   # a VM has no reason to blank its screen or idle-suspend: apply once per start
   agent_json '{"cmd":"tune"}' >/dev/null 2>&1 || true
@@ -307,8 +317,12 @@ client_has_h264() {
 
 pick_rdp_client() {
   local c
-  for c in /usr/bin/xfreerdp /usr/local/bin/xfreerdp \
-           /home/*/FreeRDP/build/client/X11/xfreerdp; do
+  # 优先用自编/自装的客户端，发行版包放最后：它们 WITH_GFX_H264=OFF，
+  # 选中后 AVC 通道根本不会协商，画面会静默退化成位图编码。
+  # 想彻底钉死，就在 /etc/winvm.conf 里写 RDP_CLIENT=/绝对路径。
+  for c in /usr/local/bin/xfreerdp \
+           /home/*/FreeRDP/build/client/X11/xfreerdp \
+           /usr/bin/xfreerdp; do
     client_has_h264 "$c" && { echo "$c"; return 0; }
   done
   return 1
@@ -329,6 +343,10 @@ rdp_start() {
     }
   fi
   [ -n "${RDP_PASS:-}" ] || { echo "rdp: RDP_PASS is empty in config"; return 1; }
+  if [ -n "$RDP_CLIENT" ] && ! client_has_h264 "$RDP_CLIENT"; then
+    echo "rdp: WARNING: RDP_CLIENT=$RDP_CLIENT has no H.264 (WITH_GFX_H264=ON);"
+    echo "     AVC444 will not be negotiated and the session falls back to bitmap encoding."
+  fi
   pkill -x xfreerdp3 2>/dev/null || true
   pkill -x xfreerdp 2>/dev/null || true
   sleep 1
@@ -340,9 +358,22 @@ rdp_start() {
   setsid env XDG_RUNTIME_DIR=/run/user/"$UID_DESKTOP" DISPLAY="$DISPLAY_NUM" XAUTHORITY="$auth" \
     "$client" /v:127.0.0.1:"$RDP_PORT" /u:"$RDP_USER" /p:"$RDP_PASS" \
       /cert:ignore /size:"$size" /admin /network:lan \
-      +clipboard +dynamic-resolution +auto-reconnect /gfx /sound \
+      +clipboard +dynamic-resolution +auto-reconnect /gfx:AVC444,progressive:on /sound \
       > /tmp/winvm-rdp.log 2>&1 < /dev/null &
   echo "rdp: $client $size /gfx (log /tmp/winvm-rdp.log)"
+}
+
+# 启动 Moonlight VPlus（源码构建，见 scripts/build-moonlight-host.sh）
+moonlight_start() {
+  local auth="$1"
+  [ -x "$MOONLIGHT_BIN" ] || {
+    echo "moonlight: $MOONLIGHT_BIN not found (run scripts/build-moonlight-host.sh)"
+    return 1
+  }
+  pkill -f "$MOONLIGHT_BIN" 2>/dev/null || true
+  setsid env XDG_RUNTIME_DIR=/run/user/"$UID_DESKTOP" DISPLAY="$DISPLAY_NUM" XAUTHORITY="$auth" \
+    "$MOONLIGHT_BIN" > /tmp/winvm-moonlight.log 2>&1 < /dev/null &
+  echo "moonlight: $MOONLIGHT_BIN (log /tmp/winvm-moonlight.log)"
 }
 
 # 只把画面窗口拉回来：虚拟机继续在后台跑，用户不用重启它。
@@ -350,6 +381,13 @@ show_client() {
   local auth
   auth=$(ls /run/user/"$UID_DESKTOP"/.mutter-Xwaylandauth.* \
            /run/user/"$UID_DESKTOP"/xauth_* 2>/dev/null | head -1)
+  if pgrep -f "$MOONLIGHT_BIN" >/dev/null 2>&1; then
+    XDG_RUNTIME_DIR=/run/user/"$UID_DESKTOP" DISPLAY="$DISPLAY_NUM" XAUTHORITY="$auth" \
+      xdotool search --name -- Moonlight windowactivate --sync %@ 2>/dev/null || \
+      xdotool search --class -- moonlight windowactivate --sync %@ 2>/dev/null || true
+    echo "client: already running (moonlight window raised)"
+    return 0
+  fi
   if pgrep -x xfreerdp >/dev/null 2>&1 || pgrep -x xfreerdp3 >/dev/null 2>&1; then
     XDG_RUNTIME_DIR=/run/user/"$UID_DESKTOP" DISPLAY="$DISPLAY_NUM" XAUTHORITY="$auth" \
       xdotool search --class -- xfreerdp windowactivate --sync %@ 2>/dev/null || true
@@ -474,5 +512,5 @@ case "${1:-start}" in
             fi ;;
   stop)   stop ;;
   status) status ;;
-  *) echo "usage: winvm start|show|stop|status|dpi [percent]|res <W>x<H>|version"; exit 1 ;;
+  *) echo "usage: winvm start|show|stop|status|dpi [percent]|res <W>x<H>|client moonlight|rdp|version"; exit 1 ;;
 esac
