@@ -1,0 +1,14 @@
+diff --git a/app/streaming/video/ffmpeg.cpp b/app/streaming/video/ffmpeg.cpp
+index 241887e..31afb6e 100644
+--- a/app/streaming/video/ffmpeg.cpp
++++ b/app/streaming/video/ffmpeg.cpp
+@@ -2182,6 +2182,9 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
+         // Accumulate these values into the global stats
+         addVideoStats(m_ActiveWndVideoStats, m_GlobalVideoStats);
+ 
++        // Emit machine-readable stats for StreamHub (stderr, once per second).
++        logVideoStats(m_ActiveWndVideoStats, "StreamHub stats");
++
+         // Move this window into the last window slot and clear it for next window
+         SDL_memcpy(&m_LastWndVideoStats, &m_ActiveWndVideoStats, sizeof(m_ActiveWndVideoStats));
+         SDL_zero(m_ActiveWndVideoStats);

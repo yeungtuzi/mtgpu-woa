@@ -379,9 +379,30 @@ tools/gen-splash-assets.py 从 512 图标生成启动画面素材
 scripts/install-splash.sh  安装欢迎画面主题
 docs/                     安装指南、架构、基准数据（中英双语）
 docs/images/              发布用截图
+vendor/                   第三方源码清单/补丁/许可证/一键获取
 ```
 
 
 ## 许可证
 
-Apache-2.0，见 [LICENSE](LICENSE)。
+本项目原创代码 **Apache-2.0**，见 [LICENSE](LICENSE)。
+
+随发布分发的第三方组件**保留各自许可证**（聚合分发，不做重新许可）：
+
+| 组件 | 许可证 |
+|---|---|
+| Moonlight V+、Sunshine（含本项目补丁） | GPL-3.0 |
+| QEMU、QEMU Guest Agent | GPL-2.0 |
+| FreeRDP | Apache-2.0 |
+| Qt 6、KDE Frameworks、GLib、libplacebo | LGPL-3.0 / LGPL-2.1-or-later |
+| SDL2 | zlib |
+
+- **小体积/难找/我们改过的源码**随仓库：`vendor/src/`（Sunshine、FreeRDP）、
+  `vendor/patches/moonlight-qt/`（Moonlight 补丁）、`guest/qemu-ga/`（GLib helper）。
+- **巨大的系统包不打包**：QEMU、Qt 6、KDE、FFmpeg、SDL2、libplacebo 由用户用发行版安装；
+  本项目不重分发 QEMU，QEMU 也没有本地修改。
+- 源码清单/版本/commit、许可证全文、GPL/LGPL 源码提供：
+  [vendor/SOURCES.md](vendor/SOURCES.md)、[vendor/README.md](vendor/README.md)、
+  [vendor/SOURCE-OFFER.md](vendor/SOURCE-OFFER.md)。
+- **专有组件**（MT VPU 驱动/MFT、Windows 镜像、PES/MT 工具）没有可分发源码，
+  见 [vendor/PROPRIETARY.md](vendor/PROPRIETARY.md)。

@@ -52,3 +52,9 @@ GPL 义务说明
 也不把它与本项目的代码静态链接（它是独立进程，通过 virtio-serial 通信）。
 按 GPL-2.0 第 3 条，对应的完整源码可从上面列出的上游地址获取；
 如需本项目代为提供，请提 issue。
+
+gspawn-win64-helper.exe / gspawn-win64-helper-console.exe
+  来源：MSYS2 CLANGARM64 glib2 2.90.1-1（LGPL-2.1-or-later）
+  作用：补上 QEMU Guest Agent 缺失的 GLib spawn helper，使 guest-exec 可用。
+  上游源码：https://download.gnome.org/sources/glib/2.90/glib-2.90.1.tar.xz
+  MSYS2 打包脚本：https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-glib2

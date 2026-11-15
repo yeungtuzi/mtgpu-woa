@@ -1,0 +1,5 @@
+# 生成物；只保留随仓库附带的小体积、难找的源码
+src/*
+!src/.gitkeep
+!src/sunshine.tar.zst
+!src/freerdp.tar.zst

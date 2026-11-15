@@ -232,3 +232,25 @@ sudo winvm qga '{"execute":"guest-get-osinfo"}'    # 诊断透传
 * 二进制 **原样提供、未作修改**，来源与版本见 `guest/qemu-ga/NOTICE.txt`
 * 许可证全文（GPL-2.0 / LGPL-2.1 / BSD-3）见 `guest/qemu-ga/LICENSES/`
 * x86_64 guest 也可直接用 virtio-win ISO 里的 `guest-agent/qemu-ga-x86_64.msi`
+
+## 9. 第三方源码与许可证
+
+发布以**二进制安装**为主，大源码不塞进安装包：
+
+```bash
+# 宿主侧（二进制）
+sudo ./scripts/install-host.sh
+sudo ./scripts/install-streamhub-native.sh
+
+# guest 侧（Windows 11 ARM64 镜像需自备）
+powershell -ExecutionPolicy Bypass -File scripts/install-guest.ps1
+# Sunshine 源码构建见 scripts/guest/sunshine/ 与 scripts/build-sunshine-*
+```
+
+- **随仓库的小源码**：`vendor/src/sunshine.tar.zst`、`vendor/src/freerdp.tar.zst`；
+  Moonlight 只放补丁 `vendor/patches/moonlight-qt/`；QGA 的 GLib helper 在 `guest/qemu-ga/`。
+- **不打包的巨大系统包**：QEMU、Qt 6、KDE、FFmpeg、SDL2、libplacebo 由发行版安装；
+  QEMU 未修改，本项目也不重分发 QEMU。
+- 清单/版本：`vendor/SOURCES.md`；许可证全文：`vendor/LICENSES/`；
+  GPL/LGPL 书面源码提供：`vendor/SOURCE-OFFER.md`；专有组件：`vendor/PROPRIETARY.md`。
+- 需要完整上游源码时：`./vendor/fetch-sources.sh --moonlight`（可选，约 168 MB）。
