@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StreamHub · MTGPU</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="bg"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="orb"></span>
+    <span class="brand-name">STREAM<span>HUB</span></span>
+    <span class="brand-sub">MTGPU · Windows on ARM</span>
+  </div>
+  <div class="pills">
+    <div class="pill" id="pill-vm"><i></i><span>虚拟机</span><b>—</b></div>
+    <div class="pill" id="pill-sun"><i></i><span>Sunshine</span><b>—</b></div>
+    <div class="pill" id="pill-clip"><i></i><span>剪贴板</span><b>—</b></div>
+    <div class="pill" id="pill-enc"><i></i><span>编码</span><b>—</b></div>
+  </div>
+  <button class="icon-btn" id="btn-settings" title="设置" aria-label="设置">⚙</button>
+</header>
+
+<main class="layout">
+  <section class="hero glass">
+    <div class="hero-top">
+      <div class="host">
+        <div class="host-avatar">🪟</div>
+        <div>
+          <h1>Windows 11 <span>ARM64</span></h1>
+          <p class="muted">QEMU · MT VPU H.264 · Moonlight V+</p>
+        </div>
+      </div>
+      <div class="vpu">
+        <svg viewBox="0 0 120 120" class="ring">
+          <defs>
+            <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#5eead4"/>
+              <stop offset="100%" stop-color="#a78bfa"/>
+            </linearGradient>
+          </defs>
+          <circle class="ring-bg" cx="60" cy="60" r="52"/>
+          <circle class="ring-fg" id="ring-fg" cx="60" cy="60" r="52"/>
+        </svg>
+        <div class="vpu-label"><b id="vpu-val">0%</b><span>VPU 编码</span></div>
+      </div>
+    </div>
+
+    <div class="hero-mid">
+      <canvas id="spark" width="640" height="76"></canvas>
+      <div class="stat-row">
+        <div class="stat"><span>分辨率</span><b id="stat-res">1920×1080</b></div>
+        <div class="stat"><span>帧率</span><b id="stat-fps">60</b></div>
+        <div class="stat"><span>码率</span><b id="stat-bitrate">20 Mbps</b></div>
+        <div class="stat"><span>编码器</span><b id="stat-enc">MT VPU</b></div>
+      </div>
+      <div class="session-line" id="session-line">会话：Desktop · Moonlight V+ · 已连接</div>
+      <div class="chips">
+        <span>H.264</span><span>1080p60</span><span>NV12 → MT VPU</span><span>Moonlight V+</span>
+      </div>
+    </div>
+
+    <div class="hero-actions">
+      <button class="primary" id="btn-stream"><span class="pulse"></span><span id="btn-stream-label">开始串流</span></button>
+      <button class="ghost" id="btn-stop" hidden>停止串流</button>
+      <button class="ghost" id="btn-vm">启动虚拟机</button>
+    </div>
+  </section>
+
+  <section class="apps">
+    <div class="section-head">
+      <h2>应用</h2>
+      <span class="muted" id="apps-count"></span>
+    </div>
+    <div class="app-grid" id="app-grid"></div>
+    <div class="tip glass">
+      <b>提示</b>
+      <span>画面由 Moonlight V+ 承载；本面板负责连接、参数与运行状态。</span>
+    </div>
+    <div class="sys glass">
+      <div class="sys-row"><span>Moonlight</span><b>V+ · 源码构建</b></div>
+      <div class="sys-row"><span>Sunshine</span><b>2026.914 · 源码构建</b></div>
+      <div class="sys-row"><span>剪贴板</span><b>双向桥接</b></div>
+      <div class="sys-row"><span>虚拟化</span><b>QEMU · mdev · KVM</b></div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="muted">StreamHub · mtgpu-woa</div>
+  <div class="footer-actions">
+    <a class="link" href="https://127.0.0.1:47990" target="_blank" rel="noreferrer">Sunshine Web UI</a>
+    <a class="link" href="#" id="link-refresh">刷新</a>
+  </div>
+</footer>
+
+<aside class="drawer" id="drawer">
+  <div class="drawer-head"><h3>设置</h3><button class="icon-btn" id="btn-close" aria-label="关闭">✕</button></div>
+  <label>分辨率
+    <select id="sel-res">
+      <option value="1280x720">1280×720</option>
+      <option value="1920x1080">1920×1080</option>
+      <option value="2560x1440">2560×1440</option>
+    </select>
+  </label>
+  <label>帧率
+    <select id="sel-fps"><option>30</option><option>60</option><option>120</option></select>
+  </label>
+  <label>码率 <b id="bitrate-val">20</b> Mbps
+    <input type="range" id="rng-bitrate" min="5" max="80" step="5" value="20">
+  </label>
+  <label>编码器策略
+    <select id="sel-enc">
+      <option value="mediafoundation">MediaFoundation · MT VPU</option>
+      <option value="software">software · x264</option>
+    </select>
+  </label>
+  <p class="muted small">编码器切换需在 Sunshine Web UI 修改并重启 Sunshine；此处显示当前策略。</p>
+  <button class="primary" id="btn-save">保存</button>
+</aside>
+
+<div class="toast" id="toast"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

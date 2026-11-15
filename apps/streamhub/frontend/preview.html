@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StreamHub · MTGPU</title>
+<style>
+:root {
+  --bg: #05080c;
+  --bg2: #08121a;
+  --panel: rgba(255, 255, 255, 0.045);
+  --panel-strong: rgba(255, 255, 255, 0.07);
+  --stroke: rgba(255, 255, 255, 0.09);
+  --stroke-strong: rgba(255, 255, 255, 0.16);
+  --text: #e9f2f7;
+  --muted: #8fa3b0;
+  --teal: #5eead4;
+  --violet: #a78bfa;
+  --amber: #fbbf24;
+  --red: #fb7185;
+  --green: #34d399;
+  --blue: #60a5fa;
+  --radius: 26px;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Noto Sans CJK SC", "Noto Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: 64px 1fr 46px;
+}
+
+.bg {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(900px 600px at 12% -10%, rgba(94, 234, 212, 0.16), transparent 60%),
+    radial-gradient(900px 600px at 95% 0%, rgba(167, 139, 250, 0.14), transparent 55%),
+    radial-gradient(1000px 700px at 50% 120%, rgba(96, 165, 250, 0.10), transparent 60%),
+    linear-gradient(180deg, #05080c 0%, #071019 55%, #05080c 100%);
+}
+
+.bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(circle at 50% 30%, black, transparent 75%);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 0 26px;
+  border-bottom: 1px solid var(--stroke);
+  backdrop-filter: blur(14px);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 250px;
+}
+
+.orb {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: conic-gradient(from 120deg, var(--teal), var(--violet), var(--blue), var(--teal));
+  box-shadow: 0 0 22px rgba(94, 234, 212, 0.5), inset 0 0 8px rgba(255,255,255,0.5);
+  animation: breathe 4s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.08); filter: brightness(1.2); }
+}
+
+.brand-name {
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  font-size: 14px;
+}
+
+.brand-name span { color: var(--teal); }
+
+.brand-sub {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.pills {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--stroke);
+  background: var(--panel);
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 128px;
+}
+
+.pill i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 0 8px currentColor;
+}
+
+.pill b { color: var(--text); font-weight: 600; margin-left: auto; }
+.pill.ok i { background: var(--green); color: var(--green); }
+.pill.warn i { background: var(--amber); color: var(--amber); }
+.pill.bad i { background: var(--red); color: var(--red); }
+.pill.ok b { color: var(--green); }
+.pill.bad b { color: var(--red); }
+
+.icon-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid var(--stroke);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 16px;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.icon-btn:hover { background: var(--panel-strong); border-color: var(--stroke-strong); }
+
+.layout {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 22px;
+  padding: 22px 26px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.glass {
+  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.025));
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+}
+
+.hero {
+  padding: 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: -40% -10% auto auto;
+  width: 420px;
+  height: 420px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(94,234,212,0.18), transparent 65%);
+  pointer-events: none;
+}
+
+.hero-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+
+.host { display: flex; gap: 16px; align-items: center; }
+
+.host-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  display: grid;
+  place-items: center;
+  font-size: 30px;
+  background: linear-gradient(135deg, rgba(94,234,212,0.22), rgba(167,139,250,0.18));
+  border: 1px solid var(--stroke-strong);
+  box-shadow: inset 0 0 24px rgba(255,255,255,0.08);
+}
+
+.host h1 { margin: 0; font-size: 26px; letter-spacing: 0.01em; }
+.host h1 span { color: var(--teal); font-weight: 600; }
+.host p { margin: 6px 0 0; font-size: 12.5px; }
+
+.muted { color: var(--muted); }
+.small { font-size: 11.5px; line-height: 1.5; }
+
+.vpu { position: relative; width: 132px; height: 132px; flex: 0 0 auto; }
+
+.ring { width: 132px; height: 132px; transform: rotate(-90deg); }
+
+.ring-bg, .ring-fg {
+  fill: none;
+  stroke-width: 9;
+  stroke-linecap: round;
+}
+
+.ring-bg { stroke: rgba(255,255,255,0.08); }
+
+.ring-fg {
+  stroke: url(#ringGrad);
+  stroke-dasharray: 326.7;
+  stroke-dashoffset: 326.7;
+  transition: stroke-dashoffset 0.6s cubic-bezier(.2,.8,.2,1);
+  filter: drop-shadow(0 0 8px rgba(94,234,212,0.55));
+}
+
+.vpu-label {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  gap: 2px;
+}
+
+.vpu-label b { font-size: 26px; font-variant-numeric: tabular-nums; }
+.vpu-label span { font-size: 10.5px; color: var(--muted); letter-spacing: 0.08em; }
+
+.hero-mid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+}
+
+#spark {
+  width: 100%;
+  height: 76px;
+  border-radius: 16px;
+  border: 1px solid var(--stroke);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.stat-row { display: flex; gap: 12px; }
+
+.stat {
+  flex: 1;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--stroke);
+  background: rgba(255,255,255,0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat span { font-size: 11px; color: var(--muted); letter-spacing: 0.05em; }
+.stat b { font-size: 15px; font-variant-numeric: tabular-nums; }
+
+.hero-actions { display: flex; gap: 12px; margin-top: auto; align-items: center; }
+
+.primary {
+  position: relative;
+  border: 0;
+  border-radius: 16px;
+  padding: 14px 26px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #04110f;
+  background: linear-gradient(135deg, var(--teal), #7dd3fc 60%, var(--violet));
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 10px 30px rgba(94, 234, 212, 0.28);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.primary:hover { transform: translateY(-2px); box-shadow: 0 16px 40px rgba(94,234,212,0.35); }
+.primary:active { transform: translateY(0); }
+.primary[disabled] { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+.pulse {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #04110f;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+.ghost {
+  border: 1px solid var(--stroke-strong);
+  background: rgba(255,255,255,0.04);
+  color: var(--text);
+  border-radius: 16px;
+  padding: 14px 20px;
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: 0.18s ease;
+}
+
+.ghost:hover { background: rgba(255,255,255,0.09); }
+
+.apps { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+
+.section-head { display: flex; align-items: baseline; gap: 12px; }
+.section-head h2 { margin: 0; font-size: 18px; letter-spacing: 0.04em; }
+
+.app-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.app-card {
+  position: relative;
+  border-radius: 22px;
+  border: 1px solid var(--stroke);
+  background: linear-gradient(160deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02));
+  padding: 20px;
+  min-height: 188px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  cursor: pointer;
+  overflow: hidden;
+  transition: transform 0.2s cubic-bezier(.2,.8,.2,1), border-color 0.2s ease, box-shadow 0.2s ease;
+  animation: rise 0.45s both;
+}
+
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+.app-card::after {
+  content: "";
+  position: absolute;
+  inset: auto -30% -60% -30%;
+  height: 70%;
+  background: radial-gradient(circle at 50% 0%, var(--glow, rgba(94,234,212,0.25)), transparent 70%);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.app-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--stroke-strong);
+  box-shadow: 0 18px 44px rgba(0,0,0,0.45);
+}
+
+.app-card:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+.app-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  background: rgba(0,0,0,0.28);
+  border: 1px solid var(--stroke-strong);
+}
+
+.app-name { font-size: 16px; font-weight: 700; margin-top: 14px; }
+.app-meta { font-size: 11.5px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
+
+.app-play {
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid var(--stroke-strong);
+  opacity: 0;
+  transform: scale(0.85);
+  transition: 0.2s ease;
+}
+
+.app-card:hover .app-play { opacity: 1; transform: none; }
+
+.tip {
+  padding: 14px 18px;
+  border-radius: 18px;
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.tip b { color: var(--teal); font-size: 11px; letter-spacing: 0.08em; }
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 26px;
+  border-top: 1px solid var(--stroke);
+  font-size: 11.5px;
+}
+
+.footer-actions { display: flex; gap: 18px; }
+.link { color: var(--muted); text-decoration: none; transition: color 0.15s; }
+.link:hover { color: var(--teal); }
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 360px;
+  padding: 24px;
+  background: rgba(10, 18, 24, 0.92);
+  border-left: 1px solid var(--stroke-strong);
+  backdrop-filter: blur(22px);
+  transform: translateX(105%);
+  transition: transform 0.32s cubic-bezier(.2,.8,.2,1);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  box-shadow: -30px 0 80px rgba(0,0,0,0.5);
+}
+
+.drawer.open { transform: none; }
+
+.drawer-head { display: flex; align-items: center; justify-content: space-between; }
+.drawer-head h3 { margin: 0; font-size: 18px; letter-spacing: 0.04em; }
+
+.drawer label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.drawer select, .drawer input[type="range"] {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--stroke-strong);
+  background: rgba(255,255,255,0.05);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.drawer input[type="range"] { padding: 0; accent-color: var(--teal); }
+
+.drawer .primary { margin-top: auto; justify-content: center; }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  transform: translate(-50%, 30px);
+  padding: 12px 20px;
+  border-radius: 14px;
+  border: 1px solid var(--stroke-strong);
+  background: rgba(12, 20, 26, 0.95);
+  color: var(--text);
+  font-size: 13px;
+  opacity: 0;
+  pointer-events: none;
+  transition: 0.28s ease;
+  z-index: 30;
+  box-shadow: var(--shadow);
+}
+
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.err { border-color: rgba(251,113,133,0.5); }
+
+@media (max-width: 1100px) {
+  .layout { grid-template-columns: 1fr; overflow: auto; }
+  .app-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pills { display: none; }
+}
+
+.session-line {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px dashed var(--stroke);
+  background: rgba(255,255,255,0.02);
+}
+
+.sys {
+  padding: 16px 18px;
+  display: grid;
+  gap: 11px;
+}
+
+.sys-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.sys-row b { color: var(--text); font-weight: 600; font-size: 12px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.chips span {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--stroke);
+  background: rgba(255,255,255,0.03);
+  letter-spacing: 0.03em;
+}
+
+</style>
+</head>
+<body>
+<div class="bg"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="orb"></span>
+    <span class="brand-name">STREAM<span>HUB</span></span>
+    <span class="brand-sub">MTGPU · Windows on ARM</span>
+  </div>
+  <div class="pills">
+    <div class="pill" id="pill-vm"><i></i><span>虚拟机</span><b>—</b></div>
+    <div class="pill" id="pill-sun"><i></i><span>Sunshine</span><b>—</b></div>
+    <div class="pill" id="pill-clip"><i></i><span>剪贴板</span><b>—</b></div>
+    <div class="pill" id="pill-enc"><i></i><span>编码</span><b>—</b></div>
+  </div>
+  <button class="icon-btn" id="btn-settings" title="设置" aria-label="设置">⚙</button>
+</header>
+
+<main class="layout">
+  <section class="hero glass">
+    <div class="hero-top">
+      <div class="host">
+        <div class="host-avatar">🪟</div>
+        <div>
+          <h1>Windows 11 <span>ARM64</span></h1>
+          <p class="muted">QEMU · MT VPU H.264 · Moonlight V+</p>
+        </div>
+      </div>
+      <div class="vpu">
+        <svg viewBox="0 0 120 120" class="ring">
+          <defs>
+            <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#5eead4"/>
+              <stop offset="100%" stop-color="#a78bfa"/>
+            </linearGradient>
+          </defs>
+          <circle class="ring-bg" cx="60" cy="60" r="52"/>
+          <circle class="ring-fg" id="ring-fg" cx="60" cy="60" r="52"/>
+        </svg>
+        <div class="vpu-label"><b id="vpu-val">0%</b><span>VPU 编码</span></div>
+      </div>
+    </div>
+
+    <div class="hero-mid">
+      <canvas id="spark" width="640" height="76"></canvas>
+      <div class="stat-row">
+        <div class="stat"><span>分辨率</span><b id="stat-res">1920×1080</b></div>
+        <div class="stat"><span>帧率</span><b id="stat-fps">60</b></div>
+        <div class="stat"><span>码率</span><b id="stat-bitrate">20 Mbps</b></div>
+        <div class="stat"><span>编码器</span><b id="stat-enc">MT VPU</b></div>
+      </div>
+      <div class="session-line" id="session-line">会话：Desktop · Moonlight V+ · 已连接</div>
+      <div class="chips">
+        <span>H.264</span><span>1080p60</span><span>NV12 → MT VPU</span><span>Moonlight V+</span>
+      </div>
+    </div>
+
+    <div class="hero-actions">
+      <button class="primary" id="btn-stream"><span class="pulse"></span><span id="btn-stream-label">开始串流</span></button>
+      <button class="ghost" id="btn-stop" hidden>停止串流</button>
+      <button class="ghost" id="btn-vm">启动虚拟机</button>
+    </div>
+  </section>
+
+  <section class="apps">
+    <div class="section-head">
+      <h2>应用</h2>
+      <span class="muted" id="apps-count"></span>
+    </div>
+    <div class="app-grid" id="app-grid"></div>
+    <div class="tip glass">
+      <b>提示</b>
+      <span>画面由 Moonlight V+ 承载；本面板负责连接、参数与运行状态。</span>
+    </div>
+    <div class="sys glass">
+      <div class="sys-row"><span>Moonlight</span><b>V+ · 源码构建</b></div>
+      <div class="sys-row"><span>Sunshine</span><b>2026.914 · 源码构建</b></div>
+      <div class="sys-row"><span>剪贴板</span><b>双向桥接</b></div>
+      <div class="sys-row"><span>虚拟化</span><b>QEMU · mdev · KVM</b></div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="muted">StreamHub · mtgpu-woa</div>
+  <div class="footer-actions">
+    <a class="link" href="https://127.0.0.1:47990" target="_blank" rel="noreferrer">Sunshine Web UI</a>
+    <a class="link" href="#" id="link-refresh">刷新</a>
+  </div>
+</footer>
+
+<aside class="drawer" id="drawer">
+  <div class="drawer-head"><h3>设置</h3><button class="icon-btn" id="btn-close" aria-label="关闭">✕</button></div>
+  <label>分辨率
+    <select id="sel-res">
+      <option value="1280x720">1280×720</option>
+      <option value="1920x1080">1920×1080</option>
+      <option value="2560x1440">2560×1440</option>
+    </select>
+  </label>
+  <label>帧率
+    <select id="sel-fps"><option>30</option><option>60</option><option>120</option></select>
+  </label>
+  <label>码率 <b id="bitrate-val">20</b> Mbps
+    <input type="range" id="rng-bitrate" min="5" max="80" step="5" value="20">
+  </label>
+  <label>编码器策略
+    <select id="sel-enc">
+      <option value="mediafoundation">MediaFoundation · MT VPU</option>
+      <option value="software">software · x264</option>
+    </select>
+  </label>
+  <p class="muted small">编码器切换需在 Sunshine Web UI 修改并重启 Sunshine；此处显示当前策略。</p>
+  <button class="primary" id="btn-save">保存</button>
+</aside>
+
+<div class="toast" id="toast"></div>
+<script>
+const __MOCK__ = {
+  status: {vm:{running:true,pid:725991}, sunshine:{reachable:true,webui:true}, stream:{running:true,app:"Desktop"},
+           vpu:{encoder:26.7,decoder:8.6,temp:null}, clipboard:{ok:true}, encoder:"mediafoundation",
+           settings:{width:1920,height:1080,fps:60,bitrate:20000,app:"Desktop"}},
+  apps: [{name:"Desktop"},{name:"Steam Big Picture"}]
+};
+window.fetch = async (url) => {
+  const u = String(url);
+  const data = u.includes('/api/apps') ? __MOCK__.apps : (u.includes('/api/status') ? __MOCK__.status : {});
+  return { ok: true, json: async () => data };
+};
+</script>
+<script src="app.js"></script>
+</body>
+</html>
