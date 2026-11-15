@@ -31,7 +31,12 @@
 #include <thread>
 #include <cstdarg>
 
+#ifndef PROXY_DEBUG
+#define PROXY_DEBUG 0
+#endif
+
 static void plog(const char* fmt, ...) {
+#if PROXY_DEBUG
     FILE* f = nullptr;
     if (fopen_s(&f, "C:\\mtgpu-woa\\proxy.log", "a") != 0 || !f) return;
     va_list ap;
@@ -40,6 +45,9 @@ static void plog(const char* fmt, ...) {
     va_end(ap);
     fputc('\n', f);
     fclose(f);
+#else
+    (void)fmt;
+#endif
 }
 
 static const CLSID kInnerClsid = {0x60F44560, 0x5A20, 0x4857,

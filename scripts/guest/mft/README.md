@@ -54,6 +54,8 @@ the CleanPoint attribute was missing.
 ```bash
 # guest, MSYS2 CLANGARM64
 bash build-proxy.sh
+# debug build with C:\mtgpu-woa\proxy.log tracing:
+PROXY_DEBUG=1 bash build-proxy.sh   # pass -DPROXY_DEBUG=1 (see build script)
 ```
 
 ```powershell
@@ -99,3 +101,5 @@ min_log_level = info
 * GOP is set to 1 for the first input (probe/IDR) and restored to 60 after the
   first sample.
 * `mftasync.exe` / probes are diagnostics only; they are not needed at runtime.
+* Release builds compile logging out (`PROXY_DEBUG=0`); the 60 fps log writes
+  otherwise cost real I/O. The debug build writes `C:\mtgpu-woa\proxy.log`.
