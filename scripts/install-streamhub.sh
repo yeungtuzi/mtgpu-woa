@@ -37,7 +37,7 @@ if ! curl -sf --max-time 1 "http://127.0.0.1:$PORT/api/status" >/dev/null; then
   done
 fi
 exec google-chrome \
-  --app="http://127.0.0.1:$PORT/" \
+  --app="file:///opt/mtgpu-woa/streamhub/frontend/index.html" \
   --window-size=1280,860 \
   --class=StreamHub \
   --user-data-dir="$HOME/.config/streamhub-chrome" \

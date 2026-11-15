@@ -4,7 +4,7 @@ A small, good-looking local control client for the mtgpu-woa Moonlight/Sunshine
 stack. It does not reimplement streaming: Moonlight V+ stays the video engine;
 StreamHub handles app selection, parameters, status and one-click connect.
 
-![preview](../../docs/images/streamhub-preview.png)
+![live](../../docs/images/streamhub-live.png)
 
 ## Features
 
@@ -22,8 +22,10 @@ scripts/install-streamhub.sh        # installs to /opt/mtgpu-woa/streamhub
 /opt/mtgpu-woa/streamhub/streamhub.sh
 ```
 
-Backend: FastAPI on `127.0.0.1:8760`; UI served at `/` and opened in a Chrome
-app window (a desktop entry is installed as well).
+Backend: FastAPI on `127.0.0.1:8760`; the launcher opens the UI from
+`file:///opt/mtgpu-woa/streamhub/frontend/index.html` (works around a Chromium
+HTTP-document issue on this host) and talks to the backend via CORS-enabled
+fetch. `http://127.0.0.1:8760/` also serves the same UI for normal browsers.
 
 `frontend/preview.html` is a self-contained copy (inlined CSS + mock data) used
 to iterate on the UI without a backend; render it with any browser.

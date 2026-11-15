@@ -30,9 +30,13 @@ const els = {
 };
 
 const RING_LEN = 2 * Math.PI * 52;
+// file:// mode (used by the desktop launcher on this host) renders the UI from
+// disk and talks to the FastAPI backend over HTTP; normal http:// serving uses
+// same-origin relative requests.
+const API_BASE = location.protocol === "file:" ? "http://127.0.0.1:8760" : "";
 
 async function api(path, opts = {}) {
-  const res = await fetch(path, {
+  const res = await fetch(API_BASE + path, {
     headers: { "Content-Type": "application/json" },
     ...opts,
   });

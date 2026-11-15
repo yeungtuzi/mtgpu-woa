@@ -78,11 +78,15 @@
 - `/api/status` → `stream.running=true`、`vpu.encoder=25.3`、`encoder=mediafoundation`；
 - `mthreads-gmi -q` → `Encoder: 25.4%`（MT VPU 实编码）。
 
-UI 截图：`docs/images/streamhub-preview.png`（1280×860，自包含预览页 headless 渲染）。
+UI 截图：`docs/images/streamhub-live.png`（实时数据，file:// 模式，CDP 抓取 1280×804）；
+设计稿预览：`docs/images/streamhub-preview.png`。
 
-### 环境注意
+### 环境注意与解决
 
-从 SSH 会话启动的 Chrome/Chromium 在本机出现“HTTP 页面空白、`data:`/`file://` 正常”的
-网络栈异常（`python -m http.server` 同样空白），因此视觉验证改用 `file://` 自包含预览页；
-客户端本身通过 FastAPI 提供，桌面会话内的浏览器/Chrome app 窗口为正常使用路径。
-若遇到同类空白，可先在浏览器中直接打开 `http://127.0.0.1:8760/` 验证。
+从 SSH 会话启动的 Chrome/Chromium 在本机出现“HTTP 文档空白、`data:`/`file://` 正常”的
+网络栈异常（连 `python -m http.server` 也空白），但 **`file://` 页面 fetch 本地 API 正常**。
+因此客户端采用 **file:// 模式**：`streamhub.sh` 打开
+`file:///opt/mtgpu-woa/streamhub/frontend/index.html`，页面资源本地加载，数据通过
+`fetch('http://127.0.0.1:8760/api/*')`（后端已开 CORS）获取。
+实测该模式下实时渲染正常：状态胶囊、VPU 25.4%、会话、2 个应用卡片均正确。
+`http://127.0.0.1:8760/` 仍保留为普通浏览器访问方式（相对路径同源请求）。
