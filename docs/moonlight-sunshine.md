@@ -171,3 +171,23 @@ scripts/build-sunshine-guest.ps1
   headless 无法验证，需要在 Moonlight GUI 中开启后看 Sunshine 日志。
 - 结论：要做到“双向剪贴板”，需要 Foundation Sunshine（ARM64 源码构建受 MinHook 缺失/无 mediafoundation 限制）
   或同时给 Sunshine + Moonlight 加 host→client 剪贴板协议支持，超出本轮范围，目标保持 active。
+
+## Sunshine 源码编译并运行（2026-11-15 17:06）
+
+- 用 MSYS2 CLANGARM64 构建 upstream Sunshine（源码在 `C:\mtgpu-woa\src\sunshine`），
+  产物 `C:\mtgpu-woa\src\sunshine\build\sunshine.exe`（约 125 MB，17:02 链接完成）。
+- 构建要点：
+  - 需要 **Node.js Windows ARM64** 在 `C:\mtgpu-woa\node`（Web UI 的 vite 构建依赖 npm）；
+  - `-DSUNSHINE_ENABLE_TRAY=OFF -DSUNSHINE_REQUIRE_TRAY=OFF` 规避 MinHook（CLANGARM64 无包）；
+  - `ninja -j2`（8 GB 内存下 -j4 会让 clang 因页面文件不足崩溃 0x5AF）；
+  - Web UI 的 `vite build` 在 ARM64 上因 rolldown 可选依赖缺失失败，当前**复用官方安装的
+    `assets/web`**；可执行文件本身完整。
+- 运行：`sun-standalone` 计划任务（Administrator / AtLogOn）已改为指向自编译 exe，
+  工作目录 `C:\mtgpu-woa\src\sunshine\build`，配置目录 `build\config`（从官方 config 复制，
+  保留配对证书；`encoder = mediafoundation`）。
+- 验证：自编译实例日志 `Found H.264 encoder: h264_mf [mediafoundation]`、
+  `Creating encoder [h264_mf]`、`MFT name: 'NVIDIA H.264 Encoder MFT'`、
+  `CLIENT CONNECTED`；`mthreads-gmi -q` Encoder 25.3%；Moonlight 1080p60 正常解码。
+- 脚本与说明：`scripts/guest/sunshine/build-upstream.sh`、`scripts/guest/sunshine/README.md`。
+- 回滚：把 `sun-standalone` 任务指回 `C:\Program Files\Sunshine\Sunshine.exe` 并重启即可，
+  官方安装未被修改。
