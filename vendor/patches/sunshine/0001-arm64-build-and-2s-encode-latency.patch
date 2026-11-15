@@ -1,0 +1,409 @@
+diff --git a/src/client_interface.cpp b/src/client_interface.cpp
+index b333e5a..91ff028 100644
+--- a/src/client_interface.cpp
++++ b/src/client_interface.cpp
+@@ -231,7 +231,7 @@ namespace client_interface {
+     if (error) return {};
+     const auto written = std::filesystem::last_write_time(path, error).time_since_epoch().count();
+     if (error) return {};
+-    return std::to_string(size) + ':' + std::to_string(written);
++    return std::to_string(size) + ':' + std::to_string(static_cast<long long>(written));
+   }
+ 
+   std::unordered_map<std::string, play_record_t>
+diff --git a/src/client_interface.h b/src/client_interface.h
+index 012b4d3..c4a18c7 100644
+--- a/src/client_interface.h
++++ b/src/client_interface.h
+@@ -169,7 +169,9 @@ namespace client_interface {
+     if (error) return {};
+     const auto written = std::filesystem::last_write_time(file, error);
+     if (error) return {};
+-    return std::string { type } + ':' + std::to_string(size) + ':' + std::to_string(written.time_since_epoch().count()) + ';';
++    return std::string { type } + ':' +
++           std::to_string(static_cast<unsigned long long>(size)) + ':' +
++           std::to_string(static_cast<long long>(written.time_since_epoch().count())) + ';';
+   }
+ 
+   /// The application list tag with the art in it: `apps_art` is "<app id>:<live art version>;" for every application. A client re-reads the list only when the tag changes, so a
+diff --git a/src/config.cpp b/src/config.cpp
+index bb894bc..a7eabcc 100644
+--- a/src/config.cpp
++++ b/src/config.cpp
+@@ -48,6 +48,17 @@
+   #include <ffnvcodec/nvEncodeAPI.h>
+ #endif
+ 
++#ifdef _WIN32
++  #ifdef _GLIBCXX_USE_C99_INTTYPES
++    #undef _GLIBCXX_USE_C99_INTTYPES
++  #endif
++  // AMF's C++ headers must be included outside config::amd: they use
++  // unqualified std:: names, which otherwise resolve to config::amd::std.
++  #include <AMF/components/VideoEncoderAV1.h>
++  #include <AMF/components/VideoEncoderHEVC.h>
++  #include <AMF/components/VideoEncoderVCE.h>
++#endif
++
+ namespace fs = std::filesystem;
+ using namespace std::literals;
+ 
+@@ -200,13 +211,6 @@ namespace config {
+   #define AMF_VIDEO_ENCODER_UNDEFINED 0
+   #define AMF_VIDEO_ENCODER_CABAC 1
+   #define AMF_VIDEO_ENCODER_CALV 2
+-#else
+-  #ifdef _GLIBCXX_USE_C99_INTTYPES
+-    #undef _GLIBCXX_USE_C99_INTTYPES
+-  #endif
+-  #include <AMF/components/VideoEncoderAV1.h>
+-  #include <AMF/components/VideoEncoderHEVC.h>
+-  #include <AMF/components/VideoEncoderVCE.h>
+ #endif
+ 
+     enum class quality_av1_e : int {
+diff --git a/src/confighttp/diagnostics.cpp b/src/confighttp/diagnostics.cpp
+index 83c0327..41598d7 100644
+--- a/src/confighttp/diagnostics.cpp
++++ b/src/confighttp/diagnostics.cpp
+@@ -141,7 +141,36 @@ namespace confighttp::diagnostics {
+       static constexpr std::uintmax_t MAX_LOG_CACHE_SIZE = 4 * 1024 * 1024;  // 4 MB
+       static constexpr std::uintmax_t MAX_RESPONSE_SIZE = 4 * 1024 * 1024;  // 4 MB
+ 
+-      static std::atomic<std::shared_ptr<const LogCacheSnapshot>> log_cache;
++      // MSYS2 libc++ does not implement atomic<shared_ptr<T>>.
++      class log_cache_t {
++      public:
++        std::shared_ptr<const LogCacheSnapshot> load(std::memory_order = std::memory_order_acquire) const {
++          std::lock_guard lock {mutex};
++          return ptr;
++        }
++
++        void store(std::shared_ptr<const LogCacheSnapshot> value, std::memory_order = std::memory_order_release) {
++          std::lock_guard lock {mutex};
++          ptr = std::move(value);
++        }
++
++        bool compare_exchange_strong(std::shared_ptr<const LogCacheSnapshot> &expected,
++                                     std::shared_ptr<const LogCacheSnapshot> desired) {
++          std::lock_guard lock {mutex};
++          if (ptr == expected) {
++            ptr = std::move(desired);
++            return true;
++          }
++          expected = ptr;
++          return false;
++        }
++
++      private:
++        mutable std::mutex mutex;
++        std::shared_ptr<const LogCacheSnapshot> ptr;
++      };
++
++      static log_cache_t log_cache;
+ 
+       // Check file status
+       std::error_code ec;
+diff --git a/src/crash/crash_win.cpp b/src/crash/crash_win.cpp
+index 2128034..d16c6ac 100644
+--- a/src/crash/crash_win.cpp
++++ b/src/crash/crash_win.cpp
+@@ -30,6 +30,32 @@
+   #include <dbghelp.h>
+   #include <tlhelp32.h>
+ 
++#if defined(_M_ARM64)
++// The x64 crash walker below uses CONTEXT.Rip/Rsp and RtlVirtualUnwind's x64
++// frame layout, which do not exist on ARM64. Keep the public crash API usable
++// but disable platform capture until an ARM64 unwinder is implemented.
++namespace crash::detail {
++  void
++  platform_install() {}
++
++  void
++  platform_tick() {}
++
++  void
++  platform_bind_thread(slot_t &) {}
++
++  void
++  platform_release_thread(slot_t &) {}
++
++  void
++  platform_report_hang(int) {}
++
++  void
++  platform_test_crash(const char *) {}
++}  // namespace crash::detail
++
++#else
++
+ namespace crash::detail {
+   namespace {
+     using minidump_write_t = BOOL(WINAPI *)(HANDLE, DWORD, HANDLE, MINIDUMP_TYPE, PMINIDUMP_EXCEPTION_INFORMATION, PMINIDUMP_USER_STREAM_INFORMATION, PMINIDUMP_CALLBACK_INFORMATION);
+@@ -505,4 +531,6 @@ namespace crash::detail {
+   }
+ }  // namespace crash::detail
+ 
++#endif  // !_M_ARM64
++
+ #endif  // _WIN32
+diff --git a/src/nvhttp/apps.cpp b/src/nvhttp/apps.cpp
+index 58a4dcb..5cf288f 100644
+--- a/src/nvhttp/apps.cpp
++++ b/src/nvhttp/apps.cpp
+@@ -83,7 +83,11 @@ namespace nvhttp::apps {
+       std::error_code time_error;
+       const auto written = std::filesystem::last_write_time(served, time_error);
+       // fs-n4950-20261111 [time.point.cast]: a file time becomes the system clock's, for the seconds an HTTP-date carries.
+-      const std::int64_t last_modified = time_error ? std::int64_t { -1 } : std::chrono::duration_cast<std::chrono::seconds>(std::chrono::clock_cast<std::chrono::system_clock>(written).time_since_epoch()).count();
++      // libc++ in MSYS2 lacks std::chrono::clock_cast. Convert file_clock to
++      // system_clock using the current offset between the two clocks.
++      const auto written_sys = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
++        written - std::filesystem::file_time_type::clock::now() + std::chrono::system_clock::now());
++      const std::int64_t last_modified = time_error ? std::int64_t { -1 } : std::chrono::duration_cast<std::chrono::seconds>(written_sys.time_since_epoch()).count();
+ 
+       web::CaseInsensitiveMultimap validators;
+       // fs-rfc9110-http-20261110 section 8.8.3: one tag per art kind.
+diff --git a/src/nvhttp/poster.cpp b/src/nvhttp/poster.cpp
+index c32ec72..3f13cbf 100644
+--- a/src/nvhttp/poster.cpp
++++ b/src/nvhttp/poster.cpp
+@@ -162,7 +162,7 @@ namespace nvhttp::apps::poster {
+       const auto normalized = std::filesystem::absolute(path, error).lexically_normal().string();
+       if (error) return std::nullopt;
+       const auto key = std::to_string(std::hash<std::string> {}(
+-        normalized + ":" + std::to_string(size) + ":" + std::to_string(modified.time_since_epoch().count())));
++        normalized + ":" + std::to_string(size) + ":" + std::to_string(static_cast<long long>(modified.time_since_epoch().count()))));
+       return source_info_t { path, size, modified, key };
+     }
+ 
+diff --git a/src/platform/windows/audio.cpp b/src/platform/windows/audio.cpp
+index 62de960..eec0bea 100644
+--- a/src/platform/windows/audio.cpp
++++ b/src/platform/windows/audio.cpp
+@@ -36,6 +36,11 @@ DEFINE_PROPERTYKEY(PKEY_DeviceInterface_FriendlyName, 0x026e516e, 0xb814, 0x414b
+ 
+ #if defined(__x86_64) || defined(__x86_64__) || defined(__amd64) || defined(__amd64__) || defined(_M_AMD64)
+   #define STEAM_DRIVER_SUBDIR L"x64"
++#elif defined(_M_ARM64) || defined(__aarch64__)
++  // No native Steam streaming-speaker driver ships for ARM64. Keep the path
++  // well-formed so the optional Steam audio integration can be compiled;
++  // installation simply fails if the virtual speaker is requested.
++  #define STEAM_DRIVER_SUBDIR L"arm64"
+ #else
+   #warning No known Steam audio driver for this architecture
+ #endif
+diff --git a/src/platform/windows/display_device/color_profile.cpp b/src/platform/windows/display_device/color_profile.cpp
+index aab4459..16933ce 100644
+--- a/src/platform/windows/display_device/color_profile.cpp
++++ b/src/platform/windows/display_device/color_profile.cpp
+@@ -46,7 +46,9 @@ namespace display_device::win_color_profile {
+ 
+     // Older MinGW headers stop at CPST_CUSTOM_WORKING_SPACE even though the
+     // runtime API and current Windows SDK define STANDARD (7) and EXTENDED (8).
+-    constexpr auto extended_display_color_mode = static_cast<COLORPROFILESUBTYPE>(8);
++    // The value is only passed to Win32 at runtime; a constexpr cast trips
++    // Clang's enum range check against older SDK headers.
++    const auto extended_display_color_mode = static_cast<COLORPROFILESUBTYPE>(8);
+ 
+     using add_display_association_fn = HRESULT(WINAPI *)(
+       WCS_PROFILE_MANAGEMENT_SCOPE,
+diff --git a/src/platform/windows/misc.h b/src/platform/windows/misc.h
+index 2823b78..df041ae 100644
+--- a/src/platform/windows/misc.h
++++ b/src/platform/windows/misc.h
+@@ -4,6 +4,8 @@
+  */
+ #pragma once
+ 
++#include <vector>
++
+ #include <mutex>
+ 
+ #include <chrono>
+diff --git a/src/sparxie/host.cpp b/src/sparxie/host.cpp
+index 37dc5ac..c842745 100644
+--- a/src/sparxie/host.cpp
++++ b/src/sparxie/host.cpp
+@@ -288,7 +288,7 @@ namespace sparxie {
+       const bool jpeg = bytes.size() > 2 && static_cast<unsigned char>(bytes[0]) == 0xFF && static_cast<unsigned char>(bytes[1]) == 0xD8;
+       const std::string key = fnv8(norm_path(file));
+       const fs::path dir = custom_badge_dir(env);
+-      const fs::path target = dir / (key + "-" + std::to_string(size) + "-" + std::to_string(stamp) + "-r" + std::to_string(kBadgeRevision) + "-badge" + (jpeg ? ".jpg" : ".png"));
++      const fs::path target = dir / (key + "-" + std::to_string(static_cast<unsigned long long>(size)) + "-" + std::to_string(static_cast<long long>(stamp)) + "-r" + std::to_string(kBadgeRevision) + "-badge" + (jpeg ? ".jpg" : ".png"));
+       if (fs::is_regular_file(target, ec)) return target.string();
+       const Rgba image = decode_image(reinterpret_cast<const std::uint8_t *>(bytes.data()), bytes.size());
+       if (image.w <= 0) return {};
+diff --git a/src/stream.cpp b/src/stream.cpp
+index 063a326..e55653d 100644
+--- a/src/stream.cpp
++++ b/src/stream.cpp
+@@ -14,6 +14,7 @@
+ #include <cstring>
+ #include <future>
+ #include <memory>
++#include <mutex>
+ #include <optional>
+ #include <queue>
+ #include <string>
+@@ -458,6 +459,29 @@ namespace stream {
+   using endpoint_refresh_ptr = std::shared_ptr<endpoint_refresh_t>;
+   using message_queue_queue_t = std::shared_ptr<safe::queue_t<std::tuple<socket_e, av_session_id_t, message_queue_t, endpoint_refresh_ptr>>>;
+ 
++  // MSYS2 libc++ does not implement atomic<shared_ptr<T>>. Endpoint refresh is
++  // only published/read on session setup and probing, so a small mutex wrapper
++  // is sufficient and keeps the shared_ptr lifetime safe.
++  class endpoint_refresh_atomic_t {
++  public:
++    explicit endpoint_refresh_atomic_t(endpoint_refresh_ptr value = nullptr):
++        ptr { std::move(value) } {}
++
++    endpoint_refresh_ptr load(std::memory_order = std::memory_order_acquire) const {
++      std::lock_guard lock {mutex};
++      return ptr;
++    }
++
++    void store(endpoint_refresh_ptr value, std::memory_order = std::memory_order_release) {
++      std::lock_guard lock {mutex};
++      ptr = std::move(value);
++    }
++
++  private:
++    mutable std::mutex mutex;
++    endpoint_refresh_ptr ptr;
++  };
++
+   // return bytes written on success
+   // return -1 on error
+   static inline int
+@@ -666,7 +690,7 @@ namespace stream {
+       safe::mail_raw_t::event_t<video::dynamic_param_t> dynamic_param_change_events;  // 新增：动态参数调整事件
+ 
+       std::unique_ptr<platf::deinit_t> qos;
+-      std::atomic<endpoint_refresh_ptr> endpoint_refresh { nullptr };
++      endpoint_refresh_atomic_t endpoint_refresh { nullptr };
+     } video;
+ 
+     struct {
+@@ -689,7 +713,7 @@ namespace stream {
+ 
+       bool enable_mic;
+       bool mic_registered { false };
+-      std::atomic<endpoint_refresh_ptr> endpoint_refresh { nullptr };
++      endpoint_refresh_atomic_t endpoint_refresh { nullptr };
+     } audio;
+ 
+     struct {
+diff --git a/src/video.cpp b/src/video.cpp
+index 72043c8..900f009 100644
+--- a/src/video.cpp
++++ b/src/video.cpp
+@@ -2453,6 +2453,41 @@ namespace video {
+     return true;
+   }
+ 
++  namespace {
++    // The MT async MFT does not reliably preserve input PTS. Measure encode
++    // submission-to-output time and expose a 2-second rolling average as the
++    // host-processing latency when the exact capture timestamp cannot be matched.
++    class two_second_latency_average_t {
++    public:
++      void add(std::chrono::microseconds duration) {
++        const auto now = std::chrono::steady_clock::now();
++        if (now - window_start >= std::chrono::seconds(2)) {
++          window_start = now;
++          total = std::chrono::microseconds {0};
++          count = 0;
++        }
++        total += duration;
++        ++count;
++        average = total / count;
++      }
++
++      std::optional<std::chrono::steady_clock::time_point> synthetic_timestamp() const {
++        if (count == 0) {
++          return std::nullopt;
++        }
++        return std::chrono::steady_clock::now() - average;
++      }
++
++    private:
++      std::chrono::steady_clock::time_point window_start = std::chrono::steady_clock::now();
++      std::chrono::microseconds total {0};
++      std::chrono::microseconds average {0};
++      unsigned count = 0;
++    };
++
++    two_second_latency_average_t encode_latency_2s;
++  }
++
+   int
+   encode_avcodec(
+     int64_t frame_nr,
+@@ -2462,6 +2497,7 @@ namespace video {
+     std::optional<std::chrono::steady_clock::time_point> frame_timestamp,
+     std::optional<platf::frame_pipeline_trace_t> pipeline_trace) {
+     const auto submitted_frame_index = static_cast<uint64_t>(frame_nr);
++    const auto encode_start = std::chrono::steady_clock::now();
+     if (pipeline_trace) {
+       pipeline_trace->encode_submit = std::chrono::steady_clock::now();
+     }
+@@ -2512,6 +2548,10 @@ namespace video {
+         return ret;
+       }
+ 
++      const auto encode_elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
++        std::chrono::steady_clock::now() - encode_start);
++      encode_latency_2s.add(encode_elapsed);
++
+       if (av_packet->flags & AV_PKT_FLAG_KEY) {
+         BOOST_LOG(debug) << "Frame "sv << frame_nr << ": IDR Keyframe (AV_FRAME_FLAG_KEY)"sv;
+       }
+@@ -2555,6 +2595,10 @@ namespace video {
+         }
+       }
+ 
++      if (!packet->frame_timestamp) {
++        packet->frame_timestamp = encode_latency_2s.synthetic_timestamp();
++      }
++
+       packet->replacements = &session.replacements;
+       packet->channel_data = channel_data;
+       perf::record_encoded_frame(session.perf_session_id);
+diff --git a/src/webhook/webhook.cpp b/src/webhook/webhook.cpp
+index 80271fd..47d0f3f 100644
+--- a/src/webhook/webhook.cpp
++++ b/src/webhook/webhook.cpp
+@@ -53,10 +53,29 @@ namespace webhook {
+     constexpr int MAX_PRODUCTION_ATTEMPTS = 3;
+     constexpr auto RATE_LIMIT_WINDOW = 1min;
+     constexpr auto MAX_RETRY_AFTER = 60s;
+-    std::atomic<std::shared_ptr<const configuration_t>> active_configuration {
+-      std::make_shared<const configuration_t>()
++    // MSYS2 libc++ does not implement atomic<shared_ptr<T>>.
++    class active_configuration_t {
++    public:
++      explicit active_configuration_t(std::shared_ptr<const configuration_t> value):
++          ptr {std::move(value)} {}
++
++      std::shared_ptr<const configuration_t> load(std::memory_order = std::memory_order_acquire) const {
++        std::lock_guard lock {mutex};
++        return ptr;
++      }
++
++      void store(std::shared_ptr<const configuration_t> value, std::memory_order = std::memory_order_release) {
++        std::lock_guard lock {mutex};
++        ptr = std::move(value);
++      }
++
++    private:
++      mutable std::mutex mutex;
++      std::shared_ptr<const configuration_t> ptr;
+     };
+ 
++    active_configuration_t active_configuration {std::make_shared<const configuration_t>()};
++
+     bool
+     use_chinese_content() {
+       return config::sunshine.locale == "zh"sv || config::sunshine.locale == "zh_TW"sv;
