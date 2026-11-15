@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Clipboard bridge
+Exec=/opt/mtgpu-woa/share/clip-bridge.sh
+X-GNOME-Autostart-enabled=true
+NoDisplay=true

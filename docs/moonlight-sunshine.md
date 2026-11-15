@@ -217,5 +217,7 @@ scripts/build-sunshine-guest.ps1
   - host→guest：宿主设置 `bi-h2g-1`，guest 侧读到 `bi-h2g-1`；
   - guest→host：guest 设置 `bi-g2c-1`，宿主 `xclip -o` 读到 `bi-g2c-1`（无 BOM）。
 - 限制：仅文本、约 1.5 s 延迟、走 QEMU user-net `10.0.2.2:8765`。
-- 脚本：`scripts/host/clip-bridge.py|sh|service|install-clip-bridge.sh`、
+- 脚本：`scripts/host/clip-bridge.py|sh|desktop|install-clip-bridge.sh`、
   `scripts/guest/clipboard/clip-sync2.ps1|README.md`。
+- 持久化：宿主用 `~/.config/autostart/clip-bridge.desktop`（KDE 登录自启，已安装）；
+  guest 用计划任务 `clip-sync2`（Administrator / AtLogOn / Interactive，已注册）。
