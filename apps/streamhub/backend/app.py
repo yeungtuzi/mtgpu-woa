@@ -33,11 +33,20 @@ CLIP_BRIDGE = "http://127.0.0.1:8765/clip"
 PORT = 8760
 
 DEFAULT_SETTINGS = {
-    "width": 1920,
-    "height": 1080,
-    "fps": 60,
-    "bitrate": 20000,
+    "width": 1440,
+    "height": 900,
+    "fps": 120,
+    "bitrate": 40000,
     "app": "Desktop",
+    "display_mode": "windowed",
+    "ignore_aspect": True,
+    "mode": "low_latency",
+}
+
+MODE_PRESETS = {
+    "powersave": {"width": 1280, "height": 720, "fps": 60, "bitrate": 20000},
+    "balanced": {"width": 1600, "height": 900, "fps": 60, "bitrate": 30000},
+    "low_latency": {"width": 1440, "height": 900, "fps": 120, "bitrate": 40000},
 }
 
 
@@ -46,7 +55,15 @@ def load_settings() -> dict[str, Any]:
     if SETTINGS_FILE.exists():
         try:
             data = json.loads(SETTINGS_FILE.read_text())
-            return {**DEFAULT_SETTINGS, **data}
+            merged = {**DEFAULT_SETTINGS, **data}
+            # Migrate settings written before the mode selector existed.
+            if "mode" not in data:
+                merged["mode"] = (
+                    "low_latency" if merged.get("fps", 60) >= 120
+                    else "powersave" if merged.get("width", 0) <= 1280
+                    else "balanced"
+                )
+            return merged
         except Exception:
             pass
     return dict(DEFAULT_SETTINGS)
@@ -177,6 +194,9 @@ class StreamRequest(BaseModel):
     height: int | None = None
     fps: int | None = None
     bitrate: int | None = None
+    display_mode: str | None = None
+    ignore_aspect: bool | None = None
+    mode: str | None = None
 
 
 class SettingsRequest(BaseModel):
@@ -185,6 +205,9 @@ class SettingsRequest(BaseModel):
     fps: int | None = None
     bitrate: int | None = None
     app: str | None = None
+    display_mode: str | None = None
+    ignore_aspect: bool | None = None
+    mode: str | None = None
 
 
 class VmRequest(BaseModel):
@@ -256,10 +279,14 @@ def start_stream(req: StreamRequest) -> JSONResponse:
     global _stream_proc, _stream_info
     settings = load_settings()
     app_name = req.app or settings["app"]
-    width = req.width or settings["width"]
-    height = req.height or settings["height"]
-    fps = req.fps or settings["fps"]
-    bitrate = req.bitrate or settings["bitrate"]
+    mode = req.mode or settings.get("mode", "balanced")
+    preset = MODE_PRESETS.get(mode, {})
+    width = req.width or preset.get("width") or settings["width"]
+    height = req.height or preset.get("height") or settings["height"]
+    fps = req.fps or preset.get("fps") or settings["fps"]
+    bitrate = req.bitrate or preset.get("bitrate") or settings["bitrate"]
+    display_mode = req.display_mode or settings.get("display_mode", "windowed")
+    ignore_aspect = req.ignore_aspect if req.ignore_aspect is not None else settings.get("ignore_aspect", False)
     if stream_running():
         return JSONResponse({"ok": False, "error": "已有串流在运行，请先停止"}, status_code=409)
     cmd = [
@@ -273,7 +300,11 @@ def start_stream(req: StreamRequest) -> JSONResponse:
         str(fps),
         "--bitrate",
         str(bitrate),
+        "--display-mode",
+        display_mode,
     ]
+    if ignore_aspect:
+        cmd.append("--ignore-aspect-ratio")
     try:
         _stream_proc = subprocess.Popen(
             cmd,
@@ -285,7 +316,9 @@ def start_stream(req: StreamRequest) -> JSONResponse:
     except Exception as exc:  # pragma: no cover
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
     _stream_info = {"app": app_name, "pid": _stream_proc.pid, "started": time.time()}
-    save_settings({"app": app_name, "width": width, "height": height, "fps": fps, "bitrate": bitrate})
+    save_settings({"app": app_name, "width": width, "height": height, "fps": fps,
+                   "bitrate": bitrate, "display_mode": display_mode,
+                   "ignore_aspect": ignore_aspect, "mode": mode})
     return JSONResponse({"ok": True, "pid": _stream_proc.pid, "app": app_name})
 
 
@@ -317,6 +350,9 @@ def get_settings() -> dict[str, Any]:
 @app.put("/api/settings")
 def put_settings(req: SettingsRequest) -> dict[str, Any]:
     data = {k: v for k, v in req.model_dump().items() if v is not None}
+    # A mode-only update applies that mode's preset; explicit fields win.
+    if data.get("mode") and not any(k in data for k in ("width", "height", "fps", "bitrate")):
+        data.update(MODE_PRESETS.get(data["mode"], {}))
     return save_settings(data)
 
 

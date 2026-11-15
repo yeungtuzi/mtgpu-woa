@@ -25,8 +25,8 @@ ApplicationWindow {
     property real vpuPct: 0
     property var vpuHistory: []
     property var apps: []
-    property var cfg: ({width: 1920, height: 1080, fps: 60, bitrate: 20000,
-                        display_mode: "windowed", ignore_aspect: false})
+    property var cfg: ({width: 1440, height: 900, fps: 120, bitrate: 40000,
+                        display_mode: "windowed", ignore_aspect: true, mode: "low_latency"})
     property bool settingsOpen: false
 
     onClosing: function (close) {
@@ -60,8 +60,12 @@ ApplicationWindow {
             streamRunning = d.stream.running
             streamApp = d.stream.app || ""
             vpuPct = d.vpu.encoder
-            if (d.settings)
+            if (d.settings) {
                 cfg = d.settings
+                if (!cfg.mode)
+                    cfg.mode = cfg.fps >= 120 ? "low_latency"
+                             : (cfg.width <= 1280 ? "powersave" : "balanced")
+            }
             vpuHistory = vpuHistory.concat([vpuPct]).slice(-60)
             ring.requestPaint()
             spark.requestPaint()
@@ -79,12 +83,34 @@ ApplicationWindow {
         var body = {
             app: appName || cfg.app || "Desktop",
             width: cfg.width, height: cfg.height, fps: cfg.fps, bitrate: cfg.bitrate,
-            display_mode: cfg.display_mode, ignore_aspect: cfg.ignore_aspect
+            display_mode: cfg.display_mode, ignore_aspect: cfg.ignore_aspect, mode: cfg.mode
         }
         api("POST", "/api/stream", body, function (ok, d, code) {
             toast(ok ? "正在串流：" + body.app : ("启动失败 " + ((d && d.error) || code)))
             refreshStatus()
         })
+    }
+
+    function streamWithMode(mode) {
+        var body = {
+            app: cfg.app || "Desktop",
+            width: cfg.width, height: cfg.height, fps: cfg.fps, bitrate: cfg.bitrate,
+            display_mode: mode, ignore_aspect: cfg.ignore_aspect, mode: cfg.mode
+        }
+        var go = function () {
+            api("POST", "/api/stream", body, function (ok, d, code) {
+                toast(ok ? (mode === "fullscreen"
+                             ? "已全屏串流（Ctrl+Alt+Shift+F 可切换）"
+                             : "已窗口串流")
+                      : ("启动失败 " + ((d && d.error) || code)))
+                refreshStatus()
+            })
+        }
+        if (streamRunning) {
+            api("POST", "/api/stream/stop", {}, function () { setTimeout(go, 900) })
+        } else {
+            go()
+        }
     }
 
     function stopStream() {
@@ -101,14 +127,50 @@ ApplicationWindow {
         })
     }
 
+    function applyMode(m) {
+        var preset = m === "low_latency"
+            ? {width: 1440, height: 900, fps: 120, bitrate: 40000}
+            : (m === "powersave"
+               ? {width: 1280, height: 720, fps: 60, bitrate: 20000}
+               : {width: 1600, height: 900, fps: 60, bitrate: 30000})
+        cfg = Object.assign({}, cfg, preset, {mode: m})
+    }
+
     function saveSettings() {
-        api("PUT", "/api/settings", {
+        var old = cfg
+        var body = {
             width: cfg.width, height: cfg.height, fps: cfg.fps, bitrate: cfg.bitrate,
-            display_mode: cfg.display_mode, ignore_aspect: cfg.ignore_aspect
-        }, function (ok) {
-            toast(ok ? "设置已保存" : "保存失败")
+            display_mode: cfg.display_mode, ignore_aspect: cfg.ignore_aspect, mode: cfg.mode
+        }
+        api("PUT", "/api/settings", body, function (ok) {
+            if (!ok) {
+                toast("保存失败")
+                return
+            }
             settingsOpen = false
-            refreshStatus()
+            var needsRestart = streamRunning && (old.width !== cfg.width ||
+                old.height !== cfg.height || old.fps !== cfg.fps ||
+                old.display_mode !== cfg.display_mode ||
+                old.ignore_aspect !== cfg.ignore_aspect)
+            if (needsRestart) {
+                // 分辨率/模式由 Sunshine 的 display device 在串流开始时程序化切换；
+                // 重启一次串流即可，绝不要求用户去 Windows 设置里改。
+                toast("正在按新分辨率重连…")
+                api("POST", "/api/stream/stop", {}, function () {
+                    api("POST", "/api/stream", {
+                        app: cfg.app || "Desktop",
+                        width: cfg.width, height: cfg.height, fps: cfg.fps,
+                        bitrate: cfg.bitrate, display_mode: cfg.display_mode,
+                        ignore_aspect: cfg.ignore_aspect
+                    }, function (ok2, d2, code2) {
+                        toast(ok2 ? "已按新分辨率重连" : ("重连失败 " + ((d2 && d2.error) || code2)))
+                        refreshStatus()
+                    })
+                })
+            } else {
+                toast("设置已保存")
+                refreshStatus()
+            }
         })
     }
 
@@ -380,7 +442,9 @@ ApplicationWindow {
                         anchors.leftMargin: 12
                         anchors.verticalCenter: parent.verticalCenter
                         text: streamRunning
-                              ? "会话：" + (streamApp || "Desktop") + " · Moonlight V+ · 已连接 · " + vpuPct.toFixed(1) + "% VPU"
+                              ? "会话：" + (streamApp || "Desktop") + " · " +
+                                (cfg.mode === "low_latency" ? "低延迟" : cfg.mode === "powersave" ? "省电" : "均衡") +
+                                " · Moonlight V+ · 已连接 · " + vpuPct.toFixed(1) + "% VPU"
                               : "会话：未连接 · 选择应用或点击「开始串流」"
                         color: "#8fa3b0"; font.pixelSize: 11
                     }
@@ -389,7 +453,7 @@ ApplicationWindow {
                 Row {
                     spacing: 8
                     Repeater {
-                        model: ["H.264", "1080p60", "NV12 → MT VPU", "Moonlight V+"]
+                        model: ["H.264", cfg.height + "p" + cfg.fps, "NV12 → MT VPU", "Moonlight V+"]
                         delegate: Rectangle {
                             height: 25; radius: 13
                             width: chip.implicitWidth + 20
@@ -424,6 +488,20 @@ ApplicationWindow {
                         contentItem: Text {
                             text: parent.text
                             color: "#04110f"; font.pixelSize: 14; font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+                    Button {
+                        text: "全屏串流"
+                        implicitHeight: 46
+                        implicitWidth: 120
+                        onClicked: streamWithMode("fullscreen")
+                        background: Rectangle {
+                            radius: 14; color: "#101a22"; border.color: "#3a4a58"
+                        }
+                        contentItem: Text {
+                            text: parent.text; color: "#5eead4"; font.pixelSize: 13; font.bold: true
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                         }
@@ -570,11 +648,45 @@ ApplicationWindow {
                 }
             }
 
+            Text { text: "串流模式"; color: "#8fa3b0"; font.pixelSize: 11 }
+            RowLayout {
+                spacing: 8
+                Repeater {
+                    model: [{key: "powersave", label: "省电"},
+                            {key: "balanced", label: "均衡"},
+                            {key: "low_latency", label: "低延迟"}]
+                    Button {
+                        Layout.fillWidth: true
+                        implicitHeight: 34
+                        text: modelData.label
+                        onClicked: applyMode(modelData.key)
+                        background: Rectangle {
+                            radius: 10
+                            color: cfg.mode === modelData.key ? "#123b3a" : "#101820"
+                            border.color: cfg.mode === modelData.key ? "#2dd4bf" : "#26323d"
+                        }
+                        contentItem: Text {
+                            text: parent.text
+                            color: cfg.mode === modelData.key ? "#5eead4" : "#8fa3b0"
+                            font.pixelSize: 12
+                            font.bold: cfg.mode === modelData.key
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+                }
+            }
+            Text {
+                Layout.fillWidth: true
+                text: "低延迟：1440×900@120/165，VPU 占用与功耗上升；均衡 1600×900@60；省电 1280×720@60。"
+                color: "#6f8290"; font.pixelSize: 10; wrapMode: Text.WordWrap
+            }
+
             Text { text: "分辨率"; color: "#8fa3b0"; font.pixelSize: 11 }
             ComboBox {
                 id: resBox
                 Layout.fillWidth: true
-                model: ["1280x720", "1600x900", "1920x1080", "2560x1440"]
+                model: ["1280x720", "1440x900", "1600x900", "1920x1080"]
                 currentIndex: Math.max(0, model.indexOf(cfg.width + "x" + cfg.height))
                 onActivated: function (i) {
                     var p = model[i].split("x")
@@ -585,12 +697,17 @@ ApplicationWindow {
             Text { text: "帧率"; color: "#8fa3b0"; font.pixelSize: 11 }
             ComboBox {
                 Layout.fillWidth: true
-                model: ["30", "60", "120"]
+                model: ["60", "120", "144", "165"]
                 currentIndex: Math.max(0, model.indexOf(String(cfg.fps)))
                 onActivated: function (i) { cfg = Object.assign({}, cfg, {fps: parseInt(model[i])}) }
             }
 
             Text { text: "码率：" + Math.round(cfg.bitrate / 1000) + " Mbps"; color: "#8fa3b0"; font.pixelSize: 11 }
+            Text {
+                Layout.fillWidth: true
+                text: "码率只影响画质/带宽：localhost 可放心用 30–50Mbps 提升画质；调低码率主要省带宽，不会增加编码延迟。"
+                color: "#6f8290"; font.pixelSize: 10; wrapMode: Text.WordWrap
+            }
             Slider {
                 id: bitrateSlider
                 Layout.fillWidth: true
@@ -618,8 +735,18 @@ ApplicationWindow {
 
             Text {
                 Layout.fillWidth: true
-                text: "分辨率/显示模式在下次串流时生效；拉伸由 Moonlight 的 GPU 渲染完成。"
+                text: "⚠ 不要在 Windows 设置里手动改分辨率：切换时的确认对话框不会被串流，画面会卡住；请用此处设置，保存后会自动重连。"
+                color: "#fbbf24"; font.pixelSize: 10; wrapMode: Text.WordWrap
+            }
+            Text {
+                Layout.fillWidth: true
+                text: "拉伸由 Moonlight 客户端 GPU 完成：窗口放大/全屏时画面跟随放大，允许模糊。分辨率由客户端通知 Windows 程序化切换（无确认框）。"
                 color: "#6f8290"; font.pixelSize: 10; wrapMode: Text.WordWrap
+            }
+            Text {
+                Layout.fillWidth: true
+                text: "低延迟建议：1440×900 + 120/165fps。Sunshine display device 会自动切刷新率；120fps 下编码延迟约 22ms（60fps 时约 50ms）。"
+                color: "#5eead4"; font.pixelSize: 10; wrapMode: Text.WordWrap
             }
 
             Item { Layout.fillHeight: true }
@@ -627,7 +754,7 @@ ApplicationWindow {
             Button {
                 Layout.fillWidth: true
                 implicitHeight: 42
-                text: "保存"
+                text: streamRunning ? "保存并重连" : "保存"
                 onClicked: saveSettings()
                 background: Rectangle {
                     radius: 12

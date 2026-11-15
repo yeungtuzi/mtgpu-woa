@@ -301,6 +301,26 @@ Restart-Service TermService -Force
 不是 GPU 的限制。`install-guest.ps1` 会解除它，详见
 [「帧率：RDP 默认 30fps 限制及解除方法」](#帧率rdp-默认-30fps-限制及解除方法)。
 
+## 低延迟串流（Moonlight/Sunshine）
+
+StreamHub 提供三档模式，按延迟与功耗取舍：
+
+| 模式 | 分辨率/帧率 | 码率 | 实测 Encode | VPU |
+|---|---|---|---|---|
+| 省电 | 1280×720@60 | 20 Mbps | ~50 ms | ~33% |
+| 均衡 | 1600×900@60 | 30 Mbps | ~50 ms | ~18% |
+| 低延迟 | 1440×900@120 | 40 Mbps | **~21 ms** | ~48% |
+
+- 低延迟模式由 Sunshine 的 display device 自动把 guest 切到 166/168Hz；
+  帧率越高，MT VPU 的帧级管线延迟（ms）越低。客户端实测 Render 5.8ms、Decode 0.34ms。
+- **码率只影响画质/带宽，不影响编码延迟**；localhost 没有带宽压力，推荐 30–50 Mbps。
+- **不要在 Windows 设置里手动改分辨率**：切换确认框不会被串流，画面会卡住；
+  用 StreamHub 的分辨率设置（保存后自动重连，Sunshine 程序化切换）。
+- 全屏：StreamHub 的「全屏串流」按钮；串流中也可用 `Ctrl+Alt+Shift+F` 切换。
+- Sunshine 配置键是 `minimum_fps_target`（默认 0 = 客户端帧率一半，会压到 ~30fps；
+  设为 240 可避免）。完整实测与 QGA `guest-exec` 修复见
+  [docs/latency-tuning.md](docs/latency-tuning.md)。
+
 ## 安全须知
 
 ### 远程桌面默认不对外

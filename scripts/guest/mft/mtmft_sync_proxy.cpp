@@ -58,6 +58,17 @@ static const GUID kForceKeyFrame = {0x398c1b98, 0x8353, 0x475a,
                                     {0x9e, 0xf2, 0x8f, 0x26, 0x5d, 0x26, 0x03, 0x45}};
 static const GUID kGopSize = {0x95f31b26, 0x95a4, 0x41aa,
                               {0x93, 0x03, 0x24, 0x6a, 0x7f, 0xc6, 0xee, 0xf1}};
+// Low-latency / no-B-frame hints for the MT hardware encoder.
+static const GUID kLowLatencyMode = {0x9c27891a, 0xed7a, 0x40e1,
+                                     {0x88, 0xe8, 0xb2, 0x27, 0x27, 0xa0, 0x24, 0xee}};
+static const GUID kEncCommonLowLatency = {0x9d3ecd55, 0x89e8, 0x490a,
+                                          {0x97, 0x0a, 0x0c, 0x2a, 0xd7, 0xa2, 0x6e, 0xe4}};
+static const GUID kEncCommonRealTime = {0x143a0ff6, 0xa16a, 0x43da,
+                                        {0xb8, 0x1e, 0x30, 0x80, 0x51, 0x2d, 0xa3, 0x6f}};
+static const GUID kDefaultBPictureCount = {0x8d390aac, 0xdc5c, 0x4200,
+                                           {0xb5, 0x7f, 0x81, 0x4d, 0x04, 0xba, 0xba, 0xb2}};
+static const GUID kRateControlMode = {0x1c0608e9, 0x370c, 0x4710,
+                                      {0x8a, 0x58, 0xcb, 0x61, 0x81, 0xc4, 0x24, 0x23}};
 
 typedef HRESULT (STDAPICALLTYPE *DllGetClassObjectFn)(REFCLSID, REFIID, void**);
 
@@ -266,8 +277,41 @@ public:
         plog("ProcessMessage %d", (int)msg);
         return inner_->ProcessMessage(msg, p);
     }
+    void set_codec_ui4(const GUID& g, ULONG value, const char* name) {
+        if (!icodec_) return;
+        VARIANT v;
+        VariantInit(&v);
+        v.vt = VT_UI4;
+        v.ulVal = value;
+        HRESULT hr = icodec_->SetValue(&g, &v);
+        if (FAILED(hr)) {
+            VARIANT b;
+            VariantInit(&b);
+            b.vt = VT_BOOL;
+            b.boolVal = value ? VARIANT_TRUE : VARIANT_FALSE;
+            hr = icodec_->SetValue(&g, &b);
+        }
+        plog("codec %s=%lu supported=%d hr=%08lx", name, (unsigned long)value,
+             (int)icodec_->IsSupported(&g), (unsigned long)hr);
+    }
+
+    void configure_low_latency() {
+        if (ll_configured_ || !icodec_) return;
+        set_codec_ui4(kLowLatencyMode, 1, "AVLowLatencyMode");
+        set_codec_ui4(kEncCommonLowLatency, 1, "AVEncCommonLowLatency");
+        set_codec_ui4(kEncCommonRealTime, 1, "AVEncCommonRealTime");
+        set_codec_ui4(kDefaultBPictureCount, 0, "AVEncMPVDefaultBPictureCount");
+        VARIANT rc;
+        VariantInit(&rc);
+        HRESULT ghr = icodec_->GetValue(&kRateControlMode, &rc);
+        plog("codec rateControlMode vt=%d val=%lu hr=%08lx", (int)rc.vt,
+             (unsigned long)(rc.vt == VT_UI4 ? rc.ulVal : 0), (unsigned long)ghr);
+        ll_configured_ = true;
+    }
+
     HRESULT STDMETHODCALLTYPE ProcessInput(DWORD id, IMFSample* s, DWORD f) override {
         if (!inner_) return MF_E_NOT_INITIALIZED;
+        configure_low_latency();
         if (icodec_ && !forced_keyframe_) {
             VARIANT v;
             VariantInit(&v);
@@ -336,9 +380,9 @@ public:
             gop_restored_ = true;
         }
         if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT) {
-            // Output is delayed; let FFmpeg send another frame and retry,
-            // but throttle the retry loop a little.
-            Sleep(5);
+            // Output is delayed; let FFmpeg send another frame and retry.
+            // Keep the retry tight: this path is pure added latency.
+            Sleep(1);
             QueueEvent(METransformNeedInput, GUID_NULL, S_OK, nullptr);
             QueueEvent(METransformHaveOutput, GUID_NULL, S_OK, nullptr);
         }
@@ -353,7 +397,7 @@ private:
             HRESULT hr = inner_events_ ? inner_events_->GetEvent(MF_EVENT_FLAG_NO_WAIT, &ev)
                                        : E_FAIL;
             if (hr == MF_E_NO_EVENTS_AVAILABLE) {
-                Sleep(2);
+                Sleep(1);
                 continue;
             }
             if (FAILED(hr)) {
@@ -390,6 +434,7 @@ private:
     ICodecAPI* icodec_ = nullptr;
     bool forced_keyframe_ = false;
     bool gop_restored_ = false;
+    bool ll_configured_ = false;
     MFT_OUTPUT_STREAM_INFO osi_ = {};
     std::thread pump_;
     std::atomic<bool> stop_{false};
