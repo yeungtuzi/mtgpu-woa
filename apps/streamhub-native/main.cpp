@@ -1,22 +1,20 @@
-// StreamHub native — a small Qt6/QML control panel for the mtgpu-woa stack.
-// No Chromium: a QQuickWindow plus a QSystemTrayIcon; the stack itself is
-// driven through the local FastAPI backend (started on demand).
-#include <QAction>
+// StreamHub native — the window launched by the rabbit tray monitor.
+// No own tray icon: the rabbit tray owns the icon/status; this is its control
+// window. Everything is driven through the local FastAPI backend.
 #include <QApplication>
 #include <QDir>
 #include <QIcon>
-#include <QMenu>
 #include <QQmlApplicationEngine>
+#include <QQmlContext>
 #include <QProcess>
+#include <QScreen>
 #include <QQuickWindow>
-#include <QSystemTrayIcon>
 #include <QTimer>
 
 static QString appDir() { return QCoreApplication::applicationDirPath(); }
 
 static void ensureBackend()
 {
-    // Start the (tiny) Python control plane if it is not already listening.
     const QString cmd =
         "curl -sf --max-time 1 http://127.0.0.1:8760/api/status >/dev/null || "
         "(cd /opt/mtgpu-woa/streamhub && nohup python3 -m uvicorn backend.app:app "
@@ -27,14 +25,18 @@ static void ensureBackend()
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
-    app.setApplicationName("StreamHub");
+    app.setApplicationName("winvm-hub");
     app.setOrganizationName("mtgpu-woa");
-    app.setApplicationDisplayName("StreamHub");
-    app.setQuitOnLastWindowClosed(false);
+    app.setApplicationDisplayName("Windows on ARM");
+    app.setQuitOnLastWindowClosed(true);
+    app.setWindowIcon(QIcon(appDir() + "/rabbit.png"));
 
     ensureBackend();
 
     QQmlApplicationEngine engine;
+    auto *screen = QGuiApplication::primaryScreen();
+    engine.rootContext()->setContextProperty("hostRefreshRate",
+                                            screen ? screen->refreshRate() : 0.0);
     const QUrl url = QUrl::fromLocalFile(appDir() + "/qml/Main.qml");
     engine.load(url);
     if (engine.rootObjects().isEmpty())
@@ -44,7 +46,6 @@ int main(int argc, char *argv[])
     if (!window)
         return 1;
 
-    // --screenshot <path>: grab the window (works on Wayland too) and exit.
     QString shotPath;
     for (int i = 1; i < argc; ++i) {
         if (QString(argv[i]) == "--screenshot" && i + 1 < argc) {
@@ -58,36 +59,6 @@ int main(int argc, char *argv[])
             QCoreApplication::quit();
         });
     }
-
-    QSystemTrayIcon tray(QIcon(appDir() + "/icon.svg"));
-    tray.setToolTip(QStringLiteral("StreamHub · MTGPU"));
-
-    QMenu menu;
-    QAction *showAct = menu.addAction(QStringLiteral("显示面板"));
-    QAction *streamAct = menu.addAction(QStringLiteral("开始串流"));
-    menu.addSeparator();
-    QAction *quitAct = menu.addAction(QStringLiteral("退出"));
-    tray.setContextMenu(&menu);
-
-    auto showWindow = [window]() {
-        window->show();
-        window->raise();
-        window->requestActivate();
-    };
-    QObject::connect(showAct, &QAction::triggered, &app, showWindow);
-    QObject::connect(streamAct, &QAction::triggered, []() {
-        QProcess::startDetached(
-            "bash", {"-c",
-                     "curl -s -X POST http://127.0.0.1:8760/api/stream "
-                     "-H 'Content-Type: application/json' -d '{}' >/dev/null 2>&1"});
-    });
-    QObject::connect(quitAct, &QAction::triggered, &app, &QApplication::quit);
-    QObject::connect(&tray, &QSystemTrayIcon::activated, &app,
-                     [showWindow](QSystemTrayIcon::ActivationReason reason) {
-                         if (reason == QSystemTrayIcon::Trigger)
-                             showWindow();
-                     });
-    tray.show();
 
     return app.exec();
 }

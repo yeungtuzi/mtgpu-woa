@@ -206,7 +206,7 @@ class Tray:
         m.append(it)
         self.items["show"] = it
 
-        it = Gtk.MenuItem(label="打开 StreamHub 面板")
+        it = Gtk.MenuItem(label="打开控制面板")
         it.connect("activate", self.on_panel)
         m.append(it)
         self.items["panel"] = it

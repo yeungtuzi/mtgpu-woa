@@ -1,13 +1,32 @@
 diff --git a/app/streaming/video/ffmpeg.cpp b/app/streaming/video/ffmpeg.cpp
-index 241887e..31afb6e 100644
+index 241887e..21e9a36 100644
 --- a/app/streaming/video/ffmpeg.cpp
 +++ b/app/streaming/video/ffmpeg.cpp
-@@ -2182,6 +2182,9 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
+@@ -2167,12 +2167,14 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
+ 
+     // Flip stats windows roughly every second
+     if (LiGetMicroseconds() > m_ActiveWndVideoStats.measurementStartUs + 1000000) {
++        // Build a two-window stats bundle once; it is used by the overlay and by
++        // StreamHub. Per-window stats alone lack the computed FPS fields.
++        VIDEO_STATS lastTwoWndStats = {};
++        addVideoStats(m_LastWndVideoStats, lastTwoWndStats);
++        addVideoStats(m_ActiveWndVideoStats, lastTwoWndStats);
++
+         // Update overlay stats if it's enabled
+         if (Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug)) {
+-            VIDEO_STATS lastTwoWndStats = {};
+-            addVideoStats(m_LastWndVideoStats, lastTwoWndStats);
+-            addVideoStats(m_ActiveWndVideoStats, lastTwoWndStats);
+-
+             stringifyVideoStats(lastTwoWndStats,
+                                 Session::get()->getOverlayManager().getOverlayText(Overlay::OverlayDebug),
+                                 Session::get()->getOverlayManager().getOverlayMaxTextLength());
+@@ -2182,6 +2184,9 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
          // Accumulate these values into the global stats
          addVideoStats(m_ActiveWndVideoStats, m_GlobalVideoStats);
  
 +        // Emit machine-readable stats for StreamHub (stderr, once per second).
-+        logVideoStats(m_ActiveWndVideoStats, "StreamHub stats");
++        logVideoStats(lastTwoWndStats, "StreamHub stats");
 +
          // Move this window into the last window slot and clear it for next window
          SDL_memcpy(&m_LastWndVideoStats, &m_ActiveWndVideoStats, sizeof(m_ActiveWndVideoStats));

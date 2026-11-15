@@ -28,6 +28,7 @@ CONFIG_DIR = Path.home() / ".config" / "streamhub"
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
 
 MOONLIGHT = "/opt/mtgpu-woa/moonlight/bin/moonlight"
+STATS_LOG = Path("/opt/mtgpu-woa/moonlight/streamhub-stats.log")
 WINVM = "/usr/local/bin/winvm"
 CLIP_BRIDGE = "http://127.0.0.1:8765/clip"
 PORT = 8760
@@ -210,6 +211,10 @@ class SettingsRequest(BaseModel):
     mode: str | None = None
 
 
+class FullscreenRequest(BaseModel):
+    fullscreen: bool
+
+
 class VmRequest(BaseModel):
     action: str
 
@@ -306,13 +311,18 @@ def start_stream(req: StreamRequest) -> JSONResponse:
     if ignore_aspect:
         cmd.append("--ignore-aspect-ratio")
     try:
-        _stream_proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-            env=display_env(),
-        )
+        # Moonlight writes its per-second "StreamHub stats" block to stderr.
+        stats_fh = open(STATS_LOG, "wb", buffering=0)
+        try:
+            _stream_proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=stats_fh,
+                start_new_session=True,
+                env=display_env(),
+            )
+        finally:
+            stats_fh.close()
     except Exception as exc:  # pragma: no cover
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
     _stream_info = {"app": app_name, "pid": _stream_proc.pid, "started": time.time()}
@@ -340,6 +350,81 @@ def stop_stream() -> dict[str, Any]:
             pass
     _stream_proc = None
     return {"ok": True, "stopped": stopped}
+
+
+@app.post("/api/stream/fullscreen")
+def stream_fullscreen(req: FullscreenRequest) -> Any:
+    """Toggle EWMH fullscreen on the running Moonlight window (no reconnect)."""
+    env = display_env()
+    try:
+        out = subprocess.check_output(["wmctrl", "-l"], env=env, text=True, timeout=3)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": f"wmctrl 失败: {exc}"}, status_code=500)
+    wid = None
+    for line in out.splitlines():
+        if "qemu-woa - Moonlight" in line or "qemu-woa" in line:
+            wid = line.split()[0]
+            break
+    if wid is None:
+        for line in out.splitlines():
+            if "Moonlight" in line and "V+ for PC" not in line and "PES" not in line:
+                wid = line.split()[0]
+                break
+    if wid is None:
+        return JSONResponse({"ok": False, "error": "串流窗口未找到"}, status_code=409)
+    action = "add" if req.fullscreen else "remove"
+    try:
+        subprocess.run(["wmctrl", "-i", "-r", wid, "-b", f"{action},fullscreen"],
+                       env=env, timeout=3, check=False)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+    return {"ok": True, "fullscreen": req.fullscreen}
+
+
+@app.get("/api/stream/stats")
+def stream_stats() -> dict[str, Any]:
+    """Parse the latest Moonlight stats block emitted once per second."""
+    running = stream_running()
+    if not running:
+        return {"ok": False, "running": False}
+    try:
+        text = STATS_LOG.read_text(errors="replace")[-20000:]
+    except Exception:
+        return {"ok": False, "running": True}
+    idx = text.rfind("StreamHub stats")
+    if idx >= 0:
+        text = text[idx:]
+
+    m_fps = re.search(r"FPS\s+([\d.]+)", text)
+    m_rx = re.search(r"([\d.]+)\s*(?:\{\d+\})?\s*Rx", text)
+    m_de = re.search(r"([\d.]+)\s*(?:\{\d+\})?\s*De", text)
+    m_rd = re.search(r"([\d.]+)\s*(?:\{\d+\})?\s*Rd", text)
+    m_bw = re.search(r"Bandwidth\s+\**([\d.]+)\**\s*(?:\{16\})?\s*Mbps", text)
+    m_lat = re.search(r"Render\s+\**([\d.]+)\**ms\s*·\s*Decode\s+\**([\d.]+)\**ms\s*·\s*Encode\s+\**([\d.]+)\**ms", text)
+    m_net = re.search(r"Network\s+\**(\d+)\**\s*±\s*(\d+)ms", text)
+    m_loss = re.search(r"Loss\s+([\d.]+)%", text)
+
+    def f(m, i):
+        try:
+            return float(m.group(i)) if m else None
+        except Exception:
+            return None
+
+    fps = f(m_fps, 1); rx = f(m_rx, 1); de = f(m_de, 1); rd = f(m_rd, 1)
+    bw = f(m_bw, 1)
+    render = f(m_lat, 1); decode = f(m_lat, 2); encode = f(m_lat, 3)
+    net = f(m_net, 1)
+    loss = f(m_loss, 1)
+    parts = [v for v in (encode, render, decode, net) if v is not None]
+    latency = round(sum(parts), 1) if parts else None
+    ok = any(v is not None for v in (fps, bw, encode))
+    return {
+        "ok": ok, "running": True,
+        "fps": fps, "rx": rx, "de": de, "rd": rd,
+        "bandwidth": bw, "render": render, "decode": decode,
+        "encode": encode, "network": net, "loss": loss,
+        "latency": latency,
+    }
 
 
 @app.get("/api/settings")
