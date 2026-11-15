@@ -29,25 +29,27 @@ SETTINGS_FILE = CONFIG_DIR / "settings.json"
 
 MOONLIGHT = "/opt/mtgpu-woa/moonlight/bin/moonlight"
 STATS_LOG = Path("/opt/mtgpu-woa/moonlight/streamhub-stats.log")
+GUEST_FPS_SCRIPT = "/opt/mtgpu-woa/streamhub/set-guest-fps.sh"
 WINVM = "/usr/local/bin/winvm"
 CLIP_BRIDGE = "http://127.0.0.1:8765/clip"
 PORT = 8760
 
 DEFAULT_SETTINGS = {
-    "width": 1440,
+    "width": 1600,
     "height": 900,
-    "fps": 120,
-    "bitrate": 40000,
+    "fps": 60,
+    "bitrate": 25000,
     "app": "Desktop",
     "display_mode": "windowed",
     "ignore_aspect": True,
-    "mode": "low_latency",
+    "mode": "balanced",
 }
 
 MODE_PRESETS = {
-    "powersave": {"width": 1280, "height": 720, "fps": 60, "bitrate": 20000},
-    "balanced": {"width": 1600, "height": 900, "fps": 60, "bitrate": 30000},
-    "low_latency": {"width": 1440, "height": 900, "fps": 120, "bitrate": 40000},
+    # 三档明确对应帧率：节能 30 / 均衡 60 / 低延迟 120。
+    "powersave": {"width": 1280, "height": 720, "fps": 30, "bitrate": 15000},
+    "balanced": {"width": 1600, "height": 900, "fps": 60, "bitrate": 25000},
+    "low_latency": {"width": 1440, "height": 900, "fps": 120, "bitrate": 30000},
 }
 
 
@@ -290,6 +292,15 @@ def start_stream(req: StreamRequest) -> JSONResponse:
     height = req.height or preset.get("height") or settings["height"]
     fps = req.fps or preset.get("fps") or settings["fps"]
     bitrate = req.bitrate or preset.get("bitrate") or settings["bitrate"]
+    # Match the Windows guest capture/refresh rate to the requested stream FPS.
+    # Sunshine's dd_refresh_rate_option=auto is a no-op on the MT virtual
+    # display, so the helper writes a manual rate and restarts Sunshine only
+    # when the target changes.
+    try:
+        subprocess.run([GUEST_FPS_SCRIPT, str(fps)], capture_output=True,
+                       text=True, timeout=45)
+    except Exception:
+        pass
     display_mode = req.display_mode or settings.get("display_mode", "windowed")
     ignore_aspect = req.ignore_aspect if req.ignore_aspect is not None else settings.get("ignore_aspect", False)
     if stream_running():

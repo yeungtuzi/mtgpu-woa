@@ -10,12 +10,13 @@ ApplicationWindow {
     minimumWidth: 640
     minimumHeight: 460
     visible: true
-    title: "Windows on ARM"
+    title: "串流控制台"
     color: "#070d12"
 
-    property var cfg: ({width: 1440, height: 900, fps: 120, bitrate: 40000,
+    property var cfg: ({width: 1600, height: 900, fps: 60, bitrate: 25000,
                         display_mode: "windowed", ignore_aspect: true,
-                        mode: "low_latency", app: "Desktop"})
+                        mode: "balanced", app: "Desktop"})
+    property bool cfgLoaded: false
     property bool settingsOpen: false
     property bool vmRunning: false
     property bool sunshineUp: false
@@ -30,6 +31,7 @@ ApplicationWindow {
                              ? hostRefreshRate : 0
     property string toastText: ""
     property bool toastVisible: false
+    property bool uiActive: visibility !== Window.Minimized && visibility !== Window.Hidden
 
     function api(method, path, body, cb) {
         var xhr = new XMLHttpRequest()
@@ -55,13 +57,17 @@ ApplicationWindow {
             clipboardUp = d.clipboard.ok
             streamRunning = d.stream.running
             streamApp = d.stream.app || ""
-            if (d.settings) {
+            if (d.settings && !cfgLoaded) {
                 cfg = d.settings
                 if (!cfg.mode)
                     cfg.mode = cfg.fps >= 120 ? "low_latency"
                              : (cfg.width <= 1280 ? "powersave" : "balanced")
+                cfgLoaded = true
             }
         })
+    }
+
+    function refreshApps() {
         api("GET", "/api/apps", null, function (ok, d) {
             if (ok && d) {
                 apps = d
@@ -127,10 +133,10 @@ ApplicationWindow {
 
     function applyMode(m) {
         var preset = m === "low_latency"
-            ? {width: 1440, height: 900, fps: 120, bitrate: 40000}
+            ? {width: 1440, height: 900, fps: 120, bitrate: 30000}
             : (m === "powersave"
-               ? {width: 1280, height: 720, fps: 60, bitrate: 20000}
-               : {width: 1600, height: 900, fps: 60, bitrate: 30000})
+               ? {width: 1280, height: 720, fps: 30, bitrate: 15000}
+               : {width: 1600, height: 900, fps: 60, bitrate: 25000})
         cfg = Object.assign({}, cfg, preset, {mode: m})
         if (streamRunning) {
             toast("正在按" + modeLabel(m) + "模式重连…")
@@ -180,17 +186,25 @@ ApplicationWindow {
     }
 
     Timer {
-        interval: 1000
-        running: true
+        id: statusTimer
+        interval: 2000
+        running: uiActive
         repeat: true
-        onTriggered: {
-            refreshStatus()
-            if (streamRunning)
-                refreshStats()
-        }
+        onTriggered: refreshStatus()
     }
 
-    Component.onCompleted: refreshStatus()
+    Timer {
+        id: statsTimer
+        interval: 1000
+        running: streamRunning && uiActive
+        repeat: true
+        onTriggered: refreshStats()
+    }
+
+    Component.onCompleted: {
+        refreshStatus()
+        refreshApps()
+    }
 
     component StatusPill: Rectangle {
         property string label: ""
@@ -297,13 +311,13 @@ ApplicationWindow {
             ColumnLayout {
                 spacing: 0
                 Text {
-                    text: "Windows on ARM"
+                    text: "串流控制台"
                     color: "#e9f2f7"
                     font.pixelSize: 18
                     font.bold: true
                 }
                 Text {
-                    text: "MTGPU · 兔头监控器"
+                    text: "MTGPU · Windows on ARM"
                     color: "#6f8290"
                     font.pixelSize: 11
                 }
@@ -385,8 +399,10 @@ ApplicationWindow {
                                ? stats.latency.toFixed(0) + " ms" : "—"
                     }
                     StatTile {
-                        label: "显示刷新率"
-                        value: displayHz > 0 ? Math.round(displayHz) + " Hz" : "—"
+                        label: "串流帧率"
+                        value: (stats.ok && stats.rx !== undefined && stats.rx !== null)
+                               ? stats.rx.toFixed(0) + " fps"
+                               : cfg.fps + " fps"
                     }
                 }
 
@@ -396,8 +412,7 @@ ApplicationWindow {
                           ? ("编码 " + (stats.encode !== null ? stats.encode.toFixed(1) : "—") +
                              " ms · 渲染 " + (stats.render !== null ? stats.render.toFixed(1) : "—") +
                              " ms · 解码 " + (stats.decode !== null ? stats.decode.toFixed(2) : "—") +
-                             " ms · 网络 " + (stats.network !== null ? stats.network.toFixed(0) : "—") +
-                             " ms · 管线 " + (stats.rd !== null ? stats.rd.toFixed(0) : "—") + " fps")
+                             " ms · 网络 " + (stats.network !== null ? stats.network.toFixed(0) : "—") + " ms")
                           : (streamRunning ? "等待串流统计…" : "启动串流后显示实时码率/延迟/帧率")
                     color: "#5f7280"
                     font.pixelSize: 10
@@ -407,8 +422,8 @@ ApplicationWindow {
                 Text {
                     Layout.fillWidth: true
                     text: displayHz > 0
-                          ? ("host 屏幕 " + Math.round(displayHz) + "Hz；管线 fps 是接收/解码速率，实际呈现不超过屏幕刷新率。")
-                          : "管线 fps 是接收/解码速率，实际呈现受 host 屏幕刷新率限制。"
+                          ? ("guest 采集 / Moonlight 渲染 " + cfg.fps + "fps；host 屏幕 " + Math.round(displayHz) + "Hz，实际呈现由合成器限制。")
+                          : ("guest 采集 / Moonlight 渲染 " + cfg.fps + "fps；实际呈现受 host 屏幕刷新率限制。")
                     color: "#4f6270"
                     font.pixelSize: 9
                     wrapMode: Text.WordWrap
@@ -509,7 +524,7 @@ ApplicationWindow {
                     }
                     Item { Layout.fillWidth: true }
                     Text {
-                        text: "低延迟模式提高帧率，VPU 占用/功耗上升"
+                        text: "节能 30fps · 均衡 60fps · 低延迟 120fps"
                         color: "#4f6270"
                         font.pixelSize: 9
                     }
@@ -572,9 +587,14 @@ ApplicationWindow {
 
             Text { text: "帧率"; color: "#8fa3b0"; font.pixelSize: 11 }
             DarkComboBox {
-                model: ["60", "120", "144", "165"]
+                model: ["30", "60", "120", "144", "165"]
                 currentIndex: Math.max(0, model.indexOf(String(cfg.fps)))
                 onActivated: function (i) { cfg = Object.assign({}, cfg, {fps: parseInt(model[i])}) }
+            }
+            Text {
+                Layout.fillWidth: true
+                text: "节能 30fps / 均衡 60fps / 低延迟 120fps；高帧率会增加 VPU/CPU 占用。"
+                color: "#6f8290"; font.pixelSize: 10; wrapMode: Text.WordWrap
             }
 
             Text {
@@ -652,5 +672,12 @@ ApplicationWindow {
         }
     }
 
-    onClosing: Qt.quit()
+    onClosing: function (close) {
+        // Closing the window must not leave a background poller behind: stop
+        // both timers and quit; the tray menu starts a fresh instance.
+        close.accepted = true
+        statusTimer.stop()
+        statsTimer.stop()
+        Qt.quit()
+    }
 }

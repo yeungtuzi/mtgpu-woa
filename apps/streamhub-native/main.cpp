@@ -8,6 +8,10 @@
 #include <QQmlContext>
 #include <QProcess>
 #include <QScreen>
+#include <QLocalServer>
+#include <QLocalSocket>
+#include <QPointer>
+#include <QStandardPaths>
 #include <QQuickWindow>
 #include <QTimer>
 
@@ -27,11 +31,43 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     app.setApplicationName("winvm-hub");
     app.setOrganizationName("mtgpu-woa");
-    app.setApplicationDisplayName("Windows on ARM");
+    app.setApplicationDisplayName("串流控制台");
     app.setQuitOnLastWindowClosed(true);
     app.setWindowIcon(QIcon(appDir() + "/rabbit.png"));
 
     ensureBackend();
+
+    // Single instance: a second launch (tray click while the hub is alive)
+    // wakes the existing window instead of starting another poller.
+    QString socketPath = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+    if (socketPath.isEmpty())
+        socketPath = QDir::homePath() + "/.winvm-hub";
+    const QString serverName = socketPath + "/winvm-hub.sock";
+    {
+        QLocalSocket probe;
+        probe.connectToServer(serverName);
+        if (probe.waitForConnected(300)) {
+            probe.write("show\n");
+            probe.waitForBytesWritten(300);
+            return 0;
+        }
+    }
+    QLocalServer::removeServer(serverName);
+
+    QLocalServer server;
+    QPointer<QQuickWindow> window;
+    QObject::connect(&server, &QLocalServer::newConnection, &app, [&]() {
+        while (QLocalSocket *socket = server.nextPendingConnection()) {
+            socket->deleteLater();
+            if (window) {
+                window->show();
+                window->raise();
+                window->requestActivate();
+            }
+        }
+    });
+    if (!server.listen(serverName))
+        qWarning("winvm-hub: cannot listen on %s", qPrintable(serverName));
 
     QQmlApplicationEngine engine;
     auto *screen = QGuiApplication::primaryScreen();
@@ -42,7 +78,7 @@ int main(int argc, char *argv[])
     if (engine.rootObjects().isEmpty())
         return 1;
 
-    auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst());
+    window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst());
     if (!window)
         return 1;
 

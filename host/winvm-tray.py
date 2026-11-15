@@ -201,12 +201,9 @@ class Tray:
 
         m.append(Gtk.SeparatorMenuItem())
 
-        it = Gtk.MenuItem(label="显示 Windows 窗口")
-        it.connect("activate", self.on_show)
-        m.append(it)
-        self.items["show"] = it
-
-        it = Gtk.MenuItem(label="打开控制面板")
+        # The hub owns stream start/stop/fullscreen. The tray only opens it,
+        # so it never starts a second Moonlight with different display flags.
+        it = Gtk.MenuItem(label="显示控制台")
         it.connect("activate", self.on_panel)
         m.append(it)
         self.items["panel"] = it
@@ -245,11 +242,11 @@ class Tray:
             if not cli:
                 text = "Windows 在后台运行（画面未显示）"
 
-        # Windows 没在后台跑时，"显示窗口"必须是灰的——用户得先点"启动"
+        # Hub 始终可拉起，虚拟机没启动时它也能给"启动虚拟机"按钮。
         self.items["start"].set_sensitive(not vm)
         self.items["stop"].set_sensitive(vm)
         self.items["restart"].set_sensitive(vm)
-        self.items["show"].set_sensitive(vm)
+        self.items["panel"].set_sensitive(True)
         paused = st in ("paused", "suspended")
         self.items["pause"].set_sensitive(vm and not paused)
         self.items["resume"].set_sensitive(vm and paused)
@@ -301,51 +298,11 @@ class Tray:
     def on_resume(self, *_):
         self.spawn("sudo -n " + WINVM + " resume")
 
-    def on_show(self, *_):
-        # 只拉起/切换到串流画面，不动虚拟机
-        if stream_pids():
-            self._raise_stream_window()
-            return
-        self._launch_stream()
-
-    def _raise_stream_window(self):
-        for cmd in (["wmctrl", "-a", "Moonlight"],
-                    ["xdotool", "search", "--name", "Moonlight", "windowactivate", "%1"]):
-            try:
-                r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-            except (OSError, subprocess.TimeoutExpired):
-                continue
-            if r.returncode == 0:
-                return
-        self.notify("串流已在运行")
-
-    def _launch_stream(self):
-        env = dict(os.environ)
-        env.setdefault("DISPLAY", ":0")
-        if "XAUTHORITY" not in env:
-            import glob
-            candidates = glob.glob(f"/run/user/{os.getuid()}/xauth_*")
-            if candidates:
-                env["XAUTHORITY"] = candidates[0]
-        try:
-            os.makedirs(os.path.dirname(STREAM_LOG), exist_ok=True)
-            log = open(STREAM_LOG, "ab", buffering=0)
-            subprocess.Popen(
-                [MOONLIGHT_BIN, "stream", "127.0.0.1", MOONLIGHT_APP,
-                 "--resolution", MOONLIGHT_RESOLUTION,
-                 "--fps", str(MOONLIGHT_FPS), "--bitrate", str(MOONLIGHT_BITRATE)],
-                stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                start_new_session=True, env=env,
-            )
-            self.notify(f"正在连接串流（{MOONLIGHT_RESOLUTION}@{MOONLIGHT_FPS}）…")
-        except OSError as exc:
-            self.notify(f"串流启动失败：{exc}")
-
     def on_panel(self, *_):
-        # 拉起原生 StreamHub（Qt/QML，尊重 Wayland 的 HiDPI 缩放）
+        # 拉起原生串流控制台（Qt/QML，尊重 Wayland 的 HiDPI 缩放）
         exe = "/opt/mtgpu-woa/streamhub-native/streamhub-native.sh"
         if not os.path.exists(exe):
-            self.notify("StreamHub 未安装")
+            self.notify("串流控制台未安装")
             return
         subprocess.Popen([exe], stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -369,9 +326,9 @@ def main():
         t.on_panel()
         time.sleep(1)
         return 0
-    # --show：不弹菜单，直接执行“显示 Windows 窗口”（拉起/切换到串流），便于测试
+    # --show：兼容旧测试参数；现在等同显示控制台
     if "--show" in sys.argv:
-        t.on_show()
+        t.on_panel()
         time.sleep(1)
         return 0
     # --show-menu：把菜单弹出在指定位置，便于截图/演示（不影响正常使用）
