@@ -196,6 +196,12 @@ scripts/install-streamhub-native.sh
 串流分辨率与拉伸：面板里的设置会传给 Moonlight（`--resolution`、`--display-mode`、
 `--ignore-aspect-ratio`），画面缩放由 Moonlight 的 GPU 渲染路径完成。
 
+![StreamHub Native](docs/images/streamhub-native.png)
+
+启动器会自动探测 `/run/user/$UID/wayland-*` 并设置 `QT_QPA_PLATFORM="wayland;xcb"`：
+即使从 SSH/托盘等没有 `WAYLAND_DISPLAY` 的环境拉起，也会走 Wayland 并读取系统缩放
+（实测系统 scale=2：逻辑 1440×900、窗口 1180×740 逻辑、物理 2360×1480）。
+
 ## 启动画面（KDE 欢迎画面 / Splash）
 
 `share/plasma/look-and-feel/org.aibook.splash/` 是一个 KDE Plasma 6 的欢迎画面主题：
