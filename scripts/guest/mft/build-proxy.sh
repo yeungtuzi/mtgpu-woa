@@ -10,8 +10,11 @@ export MSYSTEM=CLANGARM64
 export PATH=/clangarm64/bin:$PATH
 cd "$(dirname "$0")"
 
+EXTRA=""
+if [ "${PROXY_DEBUG:-0}" = "1" ]; then EXTRA="-DPROXY_DEBUG=1"; fi
+
 clang++ -std=c++17 -O2 -shared -o mtmft_sync_proxy.dll mtmft_sync_proxy.cpp \
-  -lmfplat -lmfuuid -lole32 -luuid -loleaut32 \
+  -lmfplat -lmfuuid -lole32 -luuid -loleaut32 $EXTRA \
   -static-libgcc -static-libstdc++ \
   -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic
 
