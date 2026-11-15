@@ -1,0 +1,14 @@
+[Unit]
+Description=mtgpu-woa clipboard bridge (host <-> guest)
+After=graphical-session.target
+
+[Service]
+Type=simple
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=%t/xwayland-auth
+ExecStart=/opt/mtgpu-woa/share/clip-bridge.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

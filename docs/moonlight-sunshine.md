@@ -205,3 +205,17 @@ scripts/build-sunshine-guest.ps1
     构建在子模块阶段被暂停（任务 `foundation-build` 已停）；
   - 另：Foundation 的编码器列表没有 MediaFoundation/h264_mf，即使构建成功，要跑 MT VPU 还需给它加 h264_mf 编码器。
 - 结论：双向剪贴板/麦克风仍依赖 Foundation，受 ARM64 依赖体量/磁盘与编码器缺口限制，目标保持 active。
+
+## 双向剪贴板（独立桥接，2026-11-15 17:45）
+
+- 背景：upstream Sunshine/Moonlight 只支持 client→host（Moonlight 内手动 `Ctrl+Alt+Shift+V`）；
+  Moonlight V+ 的双向剪贴板是 Foundation Sunshine 扩展，而 Foundation 在本 ARM64 MT 平台上无法构建/运行。
+- 方案（不依赖串流协议）：宿主 `clip-bridge.py`（xclip ↔ HTTP `:8765`，systemd user 服务）
+  + guest `clip-sync2.ps1`（`System.Windows.Forms.Clipboard` + `curl.exe`，1.5 s 轮询，
+  任务 `clip-sync2` AtLogOn）。首次运行以宿主剪贴板为准，避免重启覆盖宿主。
+- 验证：
+  - host→guest：宿主设置 `bi-h2g-1`，guest 侧读到 `bi-h2g-1`；
+  - guest→host：guest 设置 `bi-g2c-1`，宿主 `xclip -o` 读到 `bi-g2c-1`（无 BOM）。
+- 限制：仅文本、约 1.5 s 延迟、走 QEMU user-net `10.0.2.2:8765`。
+- 脚本：`scripts/host/clip-bridge.py|sh|service|install-clip-bridge.sh`、
+  `scripts/guest/clipboard/clip-sync2.ps1|README.md`。
