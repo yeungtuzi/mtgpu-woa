@@ -155,12 +155,24 @@ sudo sed -i 's/^RDP_PASS=.*/RDP_PASS=你的密码/' /etc/winvm.conf && sudo winv
 | 停止 | 先请 guest 软关机（qemu-ga），失败再退回 ACPI |
 | 重启 | guest 软重启 |
 | 暂停 / 继续 | QMP 暂停与恢复 |
-| 显示 Windows 窗口 | 拉起 RDP 客户端并自动登录，回到桌面 |
+| 显示 Windows 窗口 | 拉起 **Moonlight 串流窗口**（已有串流则把它置前），回到桌面 |
 | 查看日志 | 打开运行日志 |
 | 退出 | 关掉托盘，VM 继续在后台跑 |
 
 设计上**不自动重连**：VM 在后台跑着，什么时候回到窗口由你决定，不会被弹窗打断；
 VM 没在跑时「显示 Windows 窗口」是灰的，得先点「启动」。
+
+「显示 Windows 窗口」现在直接拉起 Moonlight 串流（不再起 RDP）；串流参数可在
+`/etc/winvm.conf` 覆盖（可选）：
+
+```ini
+MOONLIGHT_BIN=/opt/mtgpu-woa/moonlight/bin/moonlight
+MOONLIGHT_APP=Desktop
+MOONLIGHT_RESOLUTION=1920x1080
+MOONLIGHT_FPS=60
+MOONLIGHT_BITRATE=20000
+WINVM_STREAM_LOG=/opt/mtgpu-woa/moonlight/stream-tray.log
+```
 
 控制面板是**可选**的——所有操作都能用命令行完成，托盘只是把常用几条放在手边。
 
