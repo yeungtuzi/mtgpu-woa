@@ -221,3 +221,15 @@ scripts/build-sunshine-guest.ps1
   `scripts/guest/clipboard/clip-sync2.ps1|README.md`。
 - 持久化：宿主用 `~/.config/autostart/clip-bridge.desktop`（KDE 登录自启，已安装）；
   guest 用计划任务 `clip-sync2`（Administrator / AtLogOn / Interactive，已注册）。
+
+## 麦克风结论（2026-11-15 17:40）
+
+- 在 Moonlight V+ 配置中置 `microphone=true` 后重启串流，客户端日志出现：
+  `RTSP SETUP streamid=mic request failed: 404`
+  —— Moonlight V+ 的麦克风走 **Foundation Sunshine 的 mic 扩展**（`streamid=mic` RTSP 端点），
+  upstream Sunshine 不实现该端点，返回 404；因此**麦克风（client→host 音频）在 upstream Sunshine 上不可用**。
+- Sunshine 2026 自带 `mic_wasapi_t` 并不能满足 V+ 的扩展协议；V+ 的麦克风/双向剪贴板均为 Foundation 扩展
+  （README 明确说明标准 Sunshine 会降级）。
+- 已恢复配置（移除 `microphone=true`），串流正常、VPU Encoder ~25%。
+- 结论：在“upstream Sunshine + MT VPU”组合下，双向剪贴板可用（自建桥接），**麦克风不可用**；
+  要同时满足 VPU + 麦克风，需要 Foundation Sunshine 并为其补上 MediaFoundation/h264_mf 编码器（本轮未完成）。
