@@ -10,11 +10,12 @@ Moonlight/Sunshine 串流延迟的实测与结论，供后续复现和调参使�
    166Hz）时 `Encode ≈ 21ms`。客户端 `Render 5.8ms / Decode 0.34ms`，网络 1ms。
 2. **Sunshine 的配置键是 `minimum_fps_target`**（不是 `min_fps_target`）。
    默认 `0` 表示取客户端帧率的一半（60fps → ~30fps），静态画面会被压到 ~27fps，
-   鼠标明显发滞。设为 `240` 后不再压帧。
-3. **显示设备交给 Sunshine 程序化切换**：
-   `dd_configuration_option=ensure_active`、`dd_resolution_option=auto`、
-   `dd_refresh_rate_option=auto`。客户端请求分辨率/刷新率，Sunshine 在串流开始时
-   自动切 guest 显示，无需去 Windows 设置里改（手动改会弹确认框且不串流）。
+   鼠标明显发滞。StreamHub 按档位把它设为 30/60/120；静态桌面仍可能因空闲自适应降到 ~1fps。
+3. **显示模式由 StreamHub 通过 Sunshine 程序化设置**：
+   `dd_resolution_option=manual` + `dd_manual_resolution`、`dd_refresh_rate_option=manual`
+   + `dd_manual_refresh_rate`。开始/重连时切 guest 显示，无需去 Windows 设置里改
+   （手动改会弹确认框且不串流）。vGPU 没有可用的 30Hz 模式，节能档用 60Hz 显示、
+   `minimum_fps_target=30` 保持 30fps 采集目标。
 4. **码率不是延迟瓶颈。** 实测 10/20/40 Mbps 下 `Encode` 基本不变（~21ms）。
    localhost 没有带宽压力，推荐 30–50 Mbps 保画质；降低码率主要省带宽，
    不会增加编码延迟/负载。
@@ -48,21 +49,23 @@ Moonlight V+ 客户端（VAAPI 解码），浮层为 Moonlight 的 performance o
 
 StreamHub 三种模式（`apps/streamhub/backend/app.py` 的 `MODE_PRESETS`）：
 
-| 模式 | 分辨率 | 帧率 | 码率 | 说明 |
-|---|---|---|---|---|
-| 省电 `powersave` | 1280×720 | 60 | 20 Mbps | VPU/功耗最低，延迟约 50ms |
-| 均衡 `balanced` | 1600×900 | 60 | 30 Mbps | 画质优先，延迟约 50ms |
-| 低延迟 `low_latency` | 1440×900 | 120 | 40 Mbps | Encode ~21ms，VPU ~48%，功耗最高 |
+| 模式 | 分辨率 | 采集帧率 | 显示刷新 | 码率 | 说明 |
+|---|---|---|---|---|---|
+| 省电 `powersave` | 1280×720 | 30 | 60Hz | 15 Mbps | VPU/功耗最低 |
+| 均衡 `balanced` | 1600×900 | 60 | 60Hz | 25 Mbps | 画质优先 |
+| 低延迟 `low_latency` | 1440×900 | 120 | 120Hz | 30 Mbps | Encode 最低，功耗最高 |
 
 Sunshine（`C:\mtgpu-woa\sunshine-built\config\sunshine.conf`）：
 
 ```ini
 encoder = mediafoundation
-min_log_level = info
+min_log_level = error
 dd_configuration_option = ensure_active
-dd_resolution_option = auto
-dd_refresh_rate_option = auto
-minimum_fps_target = 240
+dd_resolution_option = manual
+dd_manual_resolution = 1440x900
+dd_refresh_rate_option = manual
+dd_manual_refresh_rate = 120
+minimum_fps_target = 120
 ```
 
 Moonlight 侧：`vsync=false`、`framepacing=false`（`~/.config/Moonlight Game Streaming Project/Moonlight.conf`），

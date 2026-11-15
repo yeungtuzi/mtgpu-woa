@@ -51,6 +51,7 @@
 - **兔头**：启动/停止/重启 Windows、暂停/继续、四色状态图标、显示控制台、查看日志。
 - **单实例**：控制台重复打开只唤醒已有窗口；关闭窗口即退出并停止状态/统计轮询。
 - **三档帧率**：节能 30fps、均衡 60fps（默认）、低延迟 120fps。
+- **Windows 分辨率**：控制台可选 1280×720 / 1440×900 / 1600×900 / 1920×1080；开始/重连时由 Sunshine 同步 guest 显示模式。节能档显示 60Hz、采集目标仍 30fps（30Hz 不被 vGPU 支持）。请勿在 Windows 内手动切换（确认框不会被串流）。
 - **运行中全屏**：不重连，直接对 Moonlight 窗口做 EWMH fullscreen；也可 `Ctrl+Alt+Shift+F`。
 - **真实统计**：码率、端到端延迟、串流帧率；延迟拆分为编码/渲染/解码/网络。
 - **轻量 guest**：Sunshine 隐藏 console 启动、`min_log_level=error`；QGA 修复 `guest-exec`。
@@ -213,7 +214,7 @@ sudoedit /etc/winvm.conf
 - **Qt 控制台**：`apps/streamhub-native/`；QML 负责界面，`QLocalServer` 做单实例。
 - **guest MFT proxy**：`scripts/guest/mft/` 把 MT 异步 MFT 包成同步接口，Sunshine 才能稳定用硬件编码。
 - **QGA**：`guest/qemu-ga/` 随附 ARM64 二进制与 GLib spawn helper，支持 `guest-exec` 和优雅关机。
-- **Sunshine**：源码构建 + 隐藏计划任务；`scripts/guest/set-sunshine-fps.sh` 负责档位刷新率。
+- **Sunshine**：源码构建 + 隐藏计划任务；`scripts/guest/set-sunshine-display.sh` 负责档位分辨率和刷新率。
 
 ## 项目结构
 

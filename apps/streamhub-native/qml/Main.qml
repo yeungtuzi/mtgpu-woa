@@ -577,7 +577,7 @@ ApplicationWindow {
                 }
             }
 
-            Text { text: "分辨率"; color: "#8fa3b0"; font.pixelSize: 11 }
+            Text { text: "Windows 分辨率"; color: "#8fa3b0"; font.pixelSize: 11 }
             DarkComboBox {
                 model: ["1280x720", "1440x900", "1600x900", "1920x1080"]
                 currentIndex: Math.max(0, model.indexOf(cfg.width + "x" + cfg.height))
@@ -595,7 +595,7 @@ ApplicationWindow {
             }
             Text {
                 Layout.fillWidth: true
-                text: "节能 30fps / 均衡 60fps / 低延迟 120fps；高帧率会增加 VPU/CPU 占用。"
+                text: "节能 30fps（显示 60Hz）/ 均衡 60fps / 低延迟 120fps；30Hz 不被 vGPU 支持，采集目标仍按档位。"
                 color: "#6f8290"; font.pixelSize: 10; wrapMode: Text.WordWrap
             }
 
@@ -626,7 +626,7 @@ ApplicationWindow {
 
             Text {
                 Layout.fillWidth: true
-                text: "⚠ 不要在 Windows 设置里手动改分辨率：切换确认框不会被串流，画面会卡住；请用此处设置，保存后自动重连。"
+                text: "⚠ 不要在 Windows 设置里手动改分辨率：切换确认框不会被串流，画面会卡住。请用此处设置；开始/保存并重连时同步到 guest 显示模式。"
                 color: "#fbbf24"; font.pixelSize: 10; wrapMode: Text.WordWrap
             }
             Text {

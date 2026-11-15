@@ -45,6 +45,14 @@ exec google-chrome \
 SH
 chmod +x "$dest/streamhub.sh"
 
+# Host-side guest helpers. They drive QGA to update Sunshine's display config.
+if [ -f "$here/guest/set-sunshine-fps.sh" ]; then
+  sudo install -m755 "$here/guest/set-sunshine-fps.sh" "$dest/set-guest-fps.sh"
+fi
+if [ -f "$here/guest/set-sunshine-display.sh" ]; then
+  sudo install -m755 "$here/guest/set-sunshine-display.sh" "$dest/set-guest-display.sh"
+fi
+
 cat > "$dest/icon.svg" <<'SVG'
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
   <defs>

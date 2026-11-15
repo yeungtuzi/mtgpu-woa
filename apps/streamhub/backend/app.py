@@ -30,6 +30,7 @@ SETTINGS_FILE = CONFIG_DIR / "settings.json"
 MOONLIGHT = "/opt/mtgpu-woa/moonlight/bin/moonlight"
 STATS_LOG = Path("/opt/mtgpu-woa/moonlight/streamhub-stats.log")
 GUEST_FPS_SCRIPT = "/opt/mtgpu-woa/streamhub/set-guest-fps.sh"
+GUEST_DISPLAY_SCRIPT = "/opt/mtgpu-woa/streamhub/set-guest-display.sh"
 WINVM = "/usr/local/bin/winvm"
 CLIP_BRIDGE = "http://127.0.0.1:8765/clip"
 PORT = 8760
@@ -292,19 +293,30 @@ def start_stream(req: StreamRequest) -> JSONResponse:
     height = req.height or preset.get("height") or settings["height"]
     fps = req.fps or preset.get("fps") or settings["fps"]
     bitrate = req.bitrate or preset.get("bitrate") or settings["bitrate"]
-    # Match the Windows guest capture/refresh rate to the requested stream FPS.
-    # Sunshine's dd_refresh_rate_option=auto is a no-op on the MT virtual
-    # display, so the helper writes a manual rate and restarts Sunshine only
-    # when the target changes.
-    try:
-        subprocess.run([GUEST_FPS_SCRIPT, str(fps)], capture_output=True,
-                       text=True, timeout=45)
-    except Exception:
-        pass
-    display_mode = req.display_mode or settings.get("display_mode", "windowed")
-    ignore_aspect = req.ignore_aspect if req.ignore_aspect is not None else settings.get("ignore_aspect", False)
+    # Keep the guest Windows display mode and capture rate in sync with the
+    # requested stream. Manual mode is deliberate: the MT virtual display does
+    # not reliably honor client-driven mode changes. The helper only restarts
+    # Sunshine when the target actually changes.
     if stream_running():
         return JSONResponse({"ok": False, "error": "已有串流在运行，请先停止"}, status_code=409)
+    try:
+        guest_display = subprocess.run(
+            [GUEST_DISPLAY_SCRIPT, f"{width}x{height}", str(fps)],
+            capture_output=True, text=True, timeout=60,
+        )
+    except Exception as exc:
+        return JSONResponse(
+            {"ok": False, "error": f"设置 Windows 分辨率失败: {exc}"},
+            status_code=500,
+        )
+    if guest_display.returncode != 0:
+        detail = (guest_display.stdout + guest_display.stderr)[-500:].strip()
+        return JSONResponse(
+            {"ok": False, "error": "设置 Windows 分辨率失败: " + detail},
+            status_code=500,
+        )
+    display_mode = req.display_mode or settings.get("display_mode", "windowed")
+    ignore_aspect = req.ignore_aspect if req.ignore_aspect is not None else settings.get("ignore_aspect", False)
     cmd = [
         MOONLIGHT,
         "stream",

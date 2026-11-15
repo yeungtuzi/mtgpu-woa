@@ -50,6 +50,10 @@ Host: Ubuntu 24.04 ARM64 / KDE Plasma 6 Wayland
 - Single instance: opening the console again raises the existing window; closing it stops
   polling and exits.
 - Three presets: powersave 30fps, balanced 60fps (default), low-latency 120fps.
+- Windows resolution: choose 1280×720 / 1440×900 / 1600×900 / 1920×1080; Sunshine applies it
+  to the guest display on start/reconnect. The powersave preset uses a 60Hz display while
+  capturing at 30fps (the vGPU has no usable 30Hz mode). Do not change it inside Windows
+  (the confirmation dialog is not streamed).
 - Runtime fullscreen without reconnecting (EWMH; `Ctrl+Alt+Shift+F` also works).
 - Real stats: bandwidth, end-to-end latency (encode + render + decode + network), stream FPS.
 - Lightweight guest: hidden Sunshine console, `min_log_level=error`, QGA `guest-exec` fixed.
@@ -170,7 +174,7 @@ Logs:
 - Qt console `apps/streamhub-native/`; `QLocalServer` provides single-instance behavior.
 - Guest MFT proxy `scripts/guest/mft/` adapts the MT async MFT for Sunshine.
 - QGA bundle `guest/qemu-ga/` includes the Windows ARM64 binary and GLib spawn helper.
-- `scripts/guest/set-sunshine-fps.sh` applies the per-preset refresh rate.
+- `scripts/guest/set-sunshine-display.sh` applies the per-preset resolution and refresh rate.
 
 ## Project layout
 
