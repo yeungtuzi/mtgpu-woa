@@ -3,7 +3,7 @@
 **Windows 11 ARM64 on KVM/QEMU, accelerated by a Moore Threads M1000 vGPU and streamed to the
 Linux host through native Moonlight + Sunshine.**
 
-The rabbit tray owns VM power/state and the four-state icon. The **Stream Console**
+The rabbit owns VM power/state and the four-state icon. The **Stream Console**
 (Qt 6 / QML native window) owns stream start/stop, runtime fullscreen, bandwidth/latency/FPS
 and settings.
 
@@ -16,7 +16,7 @@ Version `0.1.1` · [Changelog](CHANGELOG.md) · **[中文说明](README.md)**
 
 ```
 Host: Ubuntu 24.04 ARM64 / KDE Plasma 6 Wayland
-  rabbit tray ── winvm start/stop/restart/pause ─────────────┐
+  rabbit ── winvm start/stop/restart/pause ─────────────┐
        │ "Show console"                                      ▼
   Stream Console (Qt6/QML) ── FastAPI :8760 ── Moonlight V+ ── QEMU/KVM + MT vGPU
        │ bandwidth/latency/FPS/fullscreen                      │ localhost
@@ -64,7 +64,7 @@ obtained legally by the user.
 git clone https://github.com/yeungtuzi/mtgpu-woa.git
 cd mtgpu-woa
 
-sudo ./scripts/install-host.sh          # QEMU launcher / rabbit tray / autostart
+sudo ./scripts/install-host.sh          # QEMU launcher / rabbit / autostart
 ./scripts/build-moonlight-host.sh       # Moonlight V+ -> /opt/mtgpu-woa/moonlight
 sudo ./scripts/install-streamhub.sh     # FastAPI backend + legacy web client
 sudo ./scripts/install-streamhub-native.sh  # native Qt6 console
@@ -164,7 +164,7 @@ Logs:
 ```
 apps/streamhub-native/     Qt6/QML console
 apps/streamhub/            FastAPI backend + legacy web client
-host/winvm-tray.py         rabbit tray
+host/winvm-tray.py         rabbit
 bin/winvm                  QEMU launcher / QMP+QGA wrapper
 guest/qemu-ga/             Windows ARM64 qemu-ga + GLib helper
 scripts/                   host/guest install, Moonlight/Sunshine builds, patches

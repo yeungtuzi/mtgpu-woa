@@ -3,7 +3,7 @@
 **在 ARM64 Linux 上用 KVM/QEMU 跑 Windows 11 ARM64，由 Moore Threads M1000 vGPU 硬件加速，
 再通过原生 Moonlight/Sunshine 串流回宿主桌面。**
 
-兔头托盘负责虚拟机电源、状态与四色图标；**串流控制台**（Qt 6 / QML，原生窗口）
+兔头负责虚拟机电源、状态与四色图标；**串流控制台**（Qt 6 / QML，原生窗口）
 负责开始/停止串流、运行中全屏切换、码率/延迟/帧率与设置。
 
 版本：`0.1.1` · [更新记录](CHANGELOG.md) · [English](README.en.md)
@@ -18,7 +18,7 @@
 ```
 ┌──────────────────── 宿主：Ubuntu 24.04 ARM64 / KDE Plasma 6 Wayland ────────────────────┐
 │                                                                                          │
-│  兔头托盘 ── winvm start/stop/restart/pause ──────────────┐                              │
+│  兔头 ── winvm start/stop/restart/pause ──────────────┐                              │
 │      │ 显示控制台                                          ▼                              │
 │  串流控制台 (Qt6/QML) ── FastAPI :8760 ── Moonlight V+ ── QEMU/KVM ── MT vGPU (vfio-mdev) │
 │      │ 码率/延迟/帧率/全屏                                  │ localhost                   │
@@ -37,7 +37,7 @@
 ## 特性
 
 - **原生控制台，不依赖 Chrome/Electron**：Qt 6 + QML，跟随 Wayland HiDPI。
-- **兔头托盘**：启动/停止/重启 Windows、暂停/继续、四色状态图标、显示控制台、查看日志。
+- **兔头**：启动/停止/重启 Windows、暂停/继续、四色状态图标、显示控制台、查看日志。
 - **单实例**：控制台重复打开只唤醒已有窗口；关闭窗口即退出并停止状态/统计轮询。
 - **三档帧率**：节能 30fps、均衡 60fps（默认）、低延迟 120fps。
 - **运行中全屏**：不重连，直接对 Moonlight 窗口做 EWMH fullscreen；也可 `Ctrl+Alt+Shift+F`。
@@ -66,7 +66,7 @@
 git clone https://github.com/yeungtuzi/mtgpu-woa.git
 cd mtgpu-woa
 
-# QEMU 启动器 / 兔头托盘 / 开机自启（脚本仍会顺带安装历史 RDP 客户端）
+# QEMU 启动器 / 兔头 / 开机自启（脚本仍会顺带安装历史 RDP 客户端）
 sudo ./scripts/install-host.sh
 
 # Moonlight V+（aarch64），安装到 /opt/mtgpu-woa/moonlight
@@ -116,7 +116,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build-sunshine-guest.ps1
 
 ## 使用
 
-### 兔头托盘
+### 兔头
 
 | 菜单 | 作用 |
 |---|---|
@@ -209,7 +209,7 @@ sudoedit /etc/winvm.conf
 ```
 apps/streamhub-native/     Qt6/QML 串流控制台
 apps/streamhub/            FastAPI 后端 + 旧 Web 前端
-host/winvm-tray.py         兔头托盘（电源/状态/显示控制台）
+host/winvm-tray.py         兔头（电源/状态/显示控制台）
 bin/winvm                  QEMU 启动器、QMP/QGA 封装
 guest/qemu-ga/             Windows ARM64 qemu-ga 与 GLib helper
 scripts/                   host/guest 安装、Moonlight/Sunshine 构建、补丁
