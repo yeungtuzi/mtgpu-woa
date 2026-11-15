@@ -34,6 +34,17 @@
 - 控制：宿主控制台通过 FastAPI 调 Moonlight CLI 和 QEMU；guest 电源/状态由 QGA 与 QMP 提供。
 - 音频：Moonlight/Sunshine 原生音频通道；剪贴板双向同步是额外的轻量 bridge（见下文）。
 
+## 截图
+
+| 兔头（Windows 运行中） | 串流控制台（低延迟模式） |
+|---|---|
+| ![兔头菜单](docs/images/tray-menu.png) | ![串流控制台](docs/images/console.png) |
+
+![低延迟模式下的 Windows 桌面（Moonlight FPS overlay）](docs/images/windows-low-latency.png)
+
+> 截图来自当前版本实测：低延迟模式目标 120fps；Moonlight 管线显示约 87fps，
+> host 屏幕 120Hz，实际呈现由合成器限制。
+
 ## 特性
 
 - **原生控制台，不依赖 Chrome/Electron**：Qt 6 + QML，跟随 Wayland HiDPI。

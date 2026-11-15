@@ -31,6 +31,17 @@ Host: Ubuntu 24.04 ARM64 / KDE Plasma 6 Wayland
 - Control: the backend drives Moonlight CLI and QEMU; QGA/QMP provide guest power and state.
 - Audio uses the native Moonlight/Sunshine channel. Two-way clipboard is an optional text bridge.
 
+## Screenshots
+
+| Rabbit (Windows running) | Stream Console (low-latency) |
+|---|---|
+| ![Rabbit menu](docs/images/tray-menu.png) | ![Stream Console](docs/images/console.png) |
+
+![Windows desktop in low-latency mode with the Moonlight FPS overlay](docs/images/windows-low-latency.png)
+
+> Measured on the current build: the low-latency preset targets 120fps; the Moonlight
+> pipeline shows ~87fps and the host panel runs at 120Hz. Presented frames are compositor-limited.
+
 ## Features
 
 - Native Qt 6/QML console; no Chrome/Electron.
