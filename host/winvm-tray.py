@@ -26,6 +26,37 @@ AGENT_PORT = 8790
 QMP_SOCK = "/tmp/qemudisplay.sock"
 ICON_DIR = os.environ.get("WINVM_ICON_DIR", "/usr/local/lib/winvm/icons")
 
+
+# 串流客户端：托盘里的“显示 Windows 窗口”拉起的是 Moonlight 串流窗口（不再是 RDP）。
+# /etc/winvm.conf 可覆盖：MOONLIGHT_BIN / MOONLIGHT_APP / MOONLIGHT_RESOLUTION /
+# MOONLIGHT_FPS / MOONLIGHT_BITRATE / WINVM_STREAM_LOG。
+def _load_conf(path="/etc/winvm.conf"):
+    conf = {}
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                conf[key.strip()] = value.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return conf
+
+
+CONF = _load_conf()
+MOONLIGHT_BIN = os.environ.get("MOONLIGHT_BIN") or CONF.get(
+    "MOONLIGHT_BIN", "/opt/mtgpu-woa/moonlight/bin/moonlight")
+MOONLIGHT_APP = os.environ.get("MOONLIGHT_APP") or CONF.get("MOONLIGHT_APP", "Desktop")
+MOONLIGHT_RESOLUTION = os.environ.get("MOONLIGHT_RESOLUTION") or CONF.get(
+    "MOONLIGHT_RESOLUTION", "1920x1080")
+MOONLIGHT_FPS = os.environ.get("MOONLIGHT_FPS") or CONF.get("MOONLIGHT_FPS", "60")
+MOONLIGHT_BITRATE = os.environ.get("MOONLIGHT_BITRATE") or CONF.get(
+    "MOONLIGHT_BITRATE", "20000")
+STREAM_LOG = os.environ.get("WINVM_STREAM_LOG") or CONF.get(
+    "WINVM_STREAM_LOG", "/opt/mtgpu-woa/moonlight/stream-tray.log")
+
 # 客户端掉了以后，最多这么快就尝试重连一次，避免崩溃循环里疯狂重启
 RECONNECT_COOLDOWN = 15.0
 POLL_SECONDS = 3
@@ -74,8 +105,31 @@ def vm_running():
     return pgrep("qemu-system-aarch64")
 
 
+def stream_pids():
+    """真正的 Moonlight 串流进程（argv[0]=…/moonlight、argv[1]=stream）。
+
+    不用 pgrep -f：命令行里恰好带同样字符串的 shell 会被误判。
+    """
+    pids = []
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return pids
+    for name in entries:
+        if not name.isdigit():
+            continue
+        try:
+            with open(f"/proc/{name}/cmdline", "rb") as f:
+                parts = f.read().split(b"\0")
+        except OSError:
+            continue
+        if len(parts) >= 2 and parts[0] == MOONLIGHT_BIN.encode() and parts[1] == b"stream":
+            pids.append(int(name))
+    return pids
+
+
 def client_running():
-    return pgrep("xfreerdp")
+    return bool(stream_pids())
 
 
 def qmp_status():
@@ -243,22 +297,63 @@ class Tray:
         self.spawn("sudo -n " + WINVM + " resume")
 
     def on_show(self, *_):
-        # 只拉起画面客户端并自动登录，不动虚拟机
-        self.spawn("sudo -n " + WINVM + " show")
+        # 只拉起/切换到串流画面，不动虚拟机
+        if stream_pids():
+            self._raise_stream_window()
+            return
+        self._launch_stream()
+
+    def _raise_stream_window(self):
+        for cmd in (["wmctrl", "-a", "Moonlight"],
+                    ["xdotool", "search", "--name", "Moonlight", "windowactivate", "%1"]):
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if r.returncode == 0:
+                return
+        self.notify("串流已在运行")
+
+    def _launch_stream(self):
+        env = dict(os.environ)
+        env.setdefault("DISPLAY", ":0")
+        if "XAUTHORITY" not in env:
+            import glob
+            candidates = glob.glob(f"/run/user/{os.getuid()}/xauth_*")
+            if candidates:
+                env["XAUTHORITY"] = candidates[0]
+        try:
+            os.makedirs(os.path.dirname(STREAM_LOG), exist_ok=True)
+            log = open(STREAM_LOG, "ab", buffering=0)
+            subprocess.Popen(
+                [MOONLIGHT_BIN, "stream", "127.0.0.1", MOONLIGHT_APP,
+                 "--resolution", MOONLIGHT_RESOLUTION,
+                 "--fps", str(MOONLIGHT_FPS), "--bitrate", str(MOONLIGHT_BITRATE)],
+                stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                start_new_session=True, env=env,
+            )
+            self.notify(f"正在连接串流（{MOONLIGHT_RESOLUTION}@{MOONLIGHT_FPS}）…")
+        except OSError as exc:
+            self.notify(f"串流启动失败：{exc}")
 
     def on_logs(self, *_):
         # 没有桌面终端时退回通知
-        for cmd in ("konsole -e tail -f /tmp/winvm-rdp.log",
-                    "x-terminal-emulator -e tail -f /tmp/winvm-rdp.log",
-                    "xterm -e tail -f /tmp/winvm-rdp.log"):
+        for cmd in (f"konsole -e tail -f {STREAM_LOG}",
+                    f"x-terminal-emulator -e tail -f {STREAM_LOG}",
+                    f"xterm -e tail -f {STREAM_LOG}"):
             if sh(f"command -v {cmd.split()[0]}").stdout.strip():
                 sh(cmd + " &")
                 return
-        self.notify("日志：/tmp/winvm-rdp.log")
+        self.notify(f"日志：{STREAM_LOG}")
 
 
 def main():
     t = Tray()
+    # --show：不弹菜单，直接执行“显示 Windows 窗口”（拉起/切换到串流），便于测试
+    if "--show" in sys.argv:
+        t.on_show()
+        time.sleep(1)
+        return 0
     # --show-menu：把菜单弹出在指定位置，便于截图/演示（不影响正常使用）
     if "--show-menu" in sys.argv:
         x, y = 120, 120
