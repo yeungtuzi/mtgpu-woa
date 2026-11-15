@@ -402,7 +402,7 @@ ApplicationWindow {
                         label: "串流帧率"
                         value: (stats.ok && stats.rx !== undefined && stats.rx !== null)
                                ? stats.rx.toFixed(0) + " fps"
-                               : cfg.fps + " fps"
+                               : "—"
                     }
                 }
 
