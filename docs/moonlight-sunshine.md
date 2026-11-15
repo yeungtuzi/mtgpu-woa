@@ -191,3 +191,17 @@ scripts/build-sunshine-guest.ps1
 - 脚本与说明：`scripts/guest/sunshine/build-upstream.sh`、`scripts/guest/sunshine/README.md`。
 - 回滚：把 `sun-standalone` 任务指回 `C:\Program Files\Sunshine\Sunshine.exe` 并重启即可，
   官方安装未被修改。
+
+## 自编译 Sunshine 迁移与 Foundation 尝试（2026-11-15 17:30）
+
+- 磁盘紧张（C: 一度只剩 1.25 GB），已把自编译 Sunshine 的运行文件迁到稳定目录：
+  `C:\mtgpu-woa\sunshine-built\{sunshine.exe,assets,config}`；
+  `sun-standalone` 任务改指该目录（AtLogOn），串流验证 VPU Encoder 25–27%。
+  upstream 源码树 `C:\mtgpu-woa\src\sunshine` 已删除腾空间（构建脚本可随时重克隆）。
+- Foundation Sunshine（`AlkaidLab/foundation-sunshine`，Moonlight V+ 双向剪贴板/麦克风的配套服务端）：
+  - MinHook 上游只支持 x86/x64，已做 **ARM64 桩库**（`C:\mtgpu-woa\minhook`，仅用于 hybrid-GPU hook，不影响功能）；
+  - `third-party/pyrowave`、`third-party/moonlight-audio-haptics` 子模块 checkout 失败，已手动 clone 修复；
+  - 但 pyrowave → Granite → pyroenc/vulkan-header/rapidjson/gtest 的**递归子模块**体量很大，磁盘只剩 ~3.4 GB，
+    构建在子模块阶段被暂停（任务 `foundation-build` 已停）；
+  - 另：Foundation 的编码器列表没有 MediaFoundation/h264_mf，即使构建成功，要跑 MT VPU 还需给它加 h264_mf 编码器。
+- 结论：双向剪贴板/麦克风仍依赖 Foundation，受 ARM64 依赖体量/磁盘与编码器缺口限制，目标保持 active。
