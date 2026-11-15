@@ -206,6 +206,11 @@ class Tray:
         m.append(it)
         self.items["show"] = it
 
+        it = Gtk.MenuItem(label="打开 StreamHub 面板")
+        it.connect("activate", self.on_panel)
+        m.append(it)
+        self.items["panel"] = it
+
         it = Gtk.MenuItem(label="查看日志")
         it.connect("activate", self.on_logs)
         m.append(it)
@@ -336,6 +341,16 @@ class Tray:
         except OSError as exc:
             self.notify(f"串流启动失败：{exc}")
 
+    def on_panel(self, *_):
+        # 拉起原生 StreamHub（Qt/QML，尊重 Wayland 的 HiDPI 缩放）
+        exe = "/opt/mtgpu-woa/streamhub-native/streamhub-native.sh"
+        if not os.path.exists(exe):
+            self.notify("StreamHub 未安装")
+            return
+        subprocess.Popen([exe], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True, env=dict(os.environ))
+
     def on_logs(self, *_):
         # 没有桌面终端时退回通知
         for cmd in (f"konsole -e tail -f {STREAM_LOG}",
@@ -349,6 +364,11 @@ class Tray:
 
 def main():
     t = Tray()
+    # --panel：不弹菜单，直接拉起原生 StreamHub 面板，便于测试
+    if "--panel" in sys.argv:
+        t.on_panel()
+        time.sleep(1)
+        return 0
     # --show：不弹菜单，直接执行“显示 Windows 窗口”（拉起/切换到串流），便于测试
     if "--show" in sys.argv:
         t.on_show()

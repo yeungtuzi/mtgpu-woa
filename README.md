@@ -156,6 +156,7 @@ sudo sed -i 's/^RDP_PASS=.*/RDP_PASS=你的密码/' /etc/winvm.conf && sudo winv
 | 重启 | guest 软重启 |
 | 暂停 / 继续 | QMP 暂停与恢复 |
 | 显示 Windows 窗口 | 拉起 **Moonlight 串流窗口**（已有串流则把它置前），回到桌面 |
+| 打开 StreamHub 面板 | 拉起**原生 Qt/QML 控制面板**（Wayland 原生、尊重系统 HiDPI 缩放） |
 | 查看日志 | 打开运行日志 |
 | 退出 | 关掉托盘，VM 继续在后台跑 |
 
@@ -175,6 +176,25 @@ WINVM_STREAM_LOG=/opt/mtgpu-woa/moonlight/stream-tray.log
 ```
 
 控制面板是**可选**的——所有操作都能用命令行完成，托盘只是把常用几条放在手边。
+
+### 原生客户端 StreamHub
+
+`apps/streamhub-native/` 是一个原生 Qt6/QML 面板（无 Chromium）：状态、应用卡片、
+分辨率/帧率/码率/显示模式/拉伸设置、启停串流。构建与安装：
+
+```bash
+scripts/install-streamhub-native.sh
+```
+
+- 构建时 source `/opt/kde6/env.sh`，链接桌面会话的 **Qt 6.11.3**（`/opt/kde6`），
+  不再混用系统 Qt 6.4.2；
+- 启动器不强制 `QT_QPA_PLATFORM`：Wayland 会话走 Wayland、X11 会话自动回退 xcb，
+  因此直接读取系统缩放手势（实测 scale=2 时 `screen 1440x900 dpr 2`，窗口 1180x740 逻辑像素）；
+- GNOME 下 Qt Quick/Wayland 同样可用；托盘图标依赖 StatusNotifierItem（GNOME 需装
+  AppIndicator 扩展），也可从应用菜单/托盘面板启动。
+
+串流分辨率与拉伸：面板里的设置会传给 Moonlight（`--resolution`、`--display-mode`、
+`--ignore-aspect-ratio`），画面缩放由 Moonlight 的 GPU 渲染路径完成。
 
 ## 启动画面（KDE 欢迎画面 / Splash）
 
