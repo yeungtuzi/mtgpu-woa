@@ -21,6 +21,7 @@
 #include <mftransform.h>
 #include <mferror.h>
 #include <codecapi.h>
+#include <icodecapi.h>
 #include <atomic>
 #include <condition_variable>
 #include <cstdio>
@@ -43,6 +44,12 @@ static void plog(const char* fmt, ...) {
 
 static const CLSID kInnerClsid = {0x60F44560, 0x5A20, 0x4857,
                                   {0xBF, 0xEF, 0xD2, 0x97, 0x73, 0xCB, 0x80, 0x40}};
+static const IID kIID_ICodecAPI = {0x901db4c7, 0x31ce, 0x41a2,
+                                   {0x85, 0xdc, 0x8f, 0xa0, 0xbf, 0x41, 0xb8, 0xda}};
+static const GUID kForceKeyFrame = {0x398c1b98, 0x8353, 0x475a,
+                                    {0x9e, 0xf2, 0x8f, 0x26, 0x5d, 0x26, 0x03, 0x45}};
+static const GUID kGopSize = {0x95f31b26, 0x95a4, 0x41aa,
+                              {0x93, 0x03, 0x24, 0x6a, 0x7f, 0xc6, 0xee, 0xf1}};
 
 typedef HRESULT (STDAPICALLTYPE *DllGetClassObjectFn)(REFCLSID, REFIID, void**);
 
@@ -72,6 +79,10 @@ public:
             *ppv = static_cast<IMFTransform*>(this);
         } else if (riid == IID_IMFMediaEventGenerator) {
             *ppv = static_cast<IMFMediaEventGenerator*>(this);
+        } else if (riid == kIID_ICodecAPI && inner_) {
+            // Expose the inner MFT's ICodecAPI so rate control / force-IDR
+            // requests reach the hardware encoder.
+            return inner_->QueryInterface(riid, ppv);
         } else {
             return E_NOINTERFACE;
         }
@@ -93,15 +104,15 @@ public:
             mf_started_ = true;
         }
         HMODULE mod = LoadLibraryW(inner_dll_path().c_str());
-        if (!mod) return HRESULT_FROM_WIN32(GetLastError());
+        if (!mod) { plog("init: LoadLibrary failed %lu", GetLastError()); return HRESULT_FROM_WIN32(GetLastError()); }
         auto pfn = (DllGetClassObjectFn)GetProcAddress(mod, "DllGetClassObject");
-        if (!pfn) return E_FAIL;
+        if (!pfn) { plog("init: no DllGetClassObject"); return E_FAIL; }
         IClassFactory* cf = nullptr;
         HRESULT hr = pfn(kInnerClsid, IID_IClassFactory, (void**)&cf);
-        if (FAILED(hr) || !cf) return hr;
+        if (FAILED(hr) || !cf) { plog("init: GetClassObject hr=%08lx", (unsigned long)hr); return hr; }
         hr = cf->CreateInstance(nullptr, IID_PPV_ARGS(&inner_));
         cf->Release();
-        if (FAILED(hr) || !inner_) return hr;
+        if (FAILED(hr) || !inner_) { plog("init: inner CreateInstance hr=%08lx", (unsigned long)hr); return hr; }
 
         IMFAttributes* ia = nullptr;
         if (SUCCEEDED(inner_->GetAttributes(&ia)) && ia) {
@@ -114,10 +125,18 @@ public:
             }
             ia->Release();
         } else {
+            plog("init: GetAttributes failed");
             return E_FAIL;
         }
         hr = inner_->QueryInterface(IID_IMFMediaEventGenerator, (void**)&inner_events_);
-        if (FAILED(hr)) return hr;
+        if (FAILED(hr)) { plog("init: QI eventgen hr=%08lx", (unsigned long)hr); return hr; }
+        hr = inner_->QueryInterface(kIID_ICodecAPI, (void**)&icodec_);
+        plog("init: icodec=%p hr=%08lx", (void*)icodec_, (unsigned long)hr);
+        if (icodec_) {
+            plog("  supported forcekey=%d gopsize=%d",
+                 (int)icodec_->IsSupported(&kForceKeyFrame),
+                 (int)icodec_->IsSupported(&kGopSize));
+        }
         inner_->GetOutputStreamInfo(0, &osi_);
         plog("init ok");
         pump_ = std::thread([this] { pump_loop(); });
@@ -241,14 +260,80 @@ public:
     }
     HRESULT STDMETHODCALLTYPE ProcessInput(DWORD id, IMFSample* s, DWORD f) override {
         if (!inner_) return MF_E_NOT_INITIALIZED;
+        if (icodec_ && !forced_keyframe_) {
+            VARIANT v;
+            VariantInit(&v);
+            v.vt = VT_UI4;
+            v.ulVal = 1;
+            HRESULT fk = icodec_->SetValue(&kForceKeyFrame, &v);
+            plog("ForceKeyFrame hr=%08lx", (unsigned long)fk);
+            VARIANT g;
+            VariantInit(&g);
+            g.vt = VT_UI4;
+            g.ulVal = 1;
+            HRESULT gh = icodec_->SetValue(&kGopSize, &g);
+            plog("GOP=1 hr=%08lx", (unsigned long)gh);
+            forced_keyframe_ = true;
+        }
         HRESULT hr = inner_->ProcessInput(id, s, f);
         plog("ProcessInput hr=%08lx", (unsigned long)hr);
+        if (SUCCEEDED(hr)) {
+            // The MT MFT does not reliably emit HaveOutput after the first
+            // frame (it has an output delay). Nudge FFmpeg's async loop so it
+            // keeps feeding input and retries ProcessOutput.
+            QueueEvent(METransformNeedInput, GUID_NULL, S_OK, nullptr);
+            QueueEvent(METransformHaveOutput, GUID_NULL, S_OK, nullptr);
+        }
         return hr;
     }
     HRESULT STDMETHODCALLTYPE ProcessOutput(DWORD f, DWORD n, MFT_OUTPUT_DATA_BUFFER* b, DWORD* st) override {
         if (!inner_) return MF_E_NOT_INITIALIZED;
         HRESULT hr = inner_->ProcessOutput(f, n, b, st);
         plog("ProcessOutput hr=%08lx", (unsigned long)hr);
+        if (hr == S_OK && b && b[0].pSample) {
+            // The MT MFT emits an IDR access unit (SPS/PPS/SEI/IDR NAL) but
+            // does not set MFSampleExtension_CleanPoint. FFmpeg derives
+            // AV_PKT_FLAG_KEY from it, and Sunshine's IDR probe requires it.
+            IMFMediaBuffer* buf = nullptr;
+            if (SUCCEEDED(b[0].pSample->GetBufferByIndex(0, &buf)) && buf) {
+                BYTE* p = nullptr;
+                DWORD cb = 0;
+                if (SUCCEEDED(buf->Lock(&p, nullptr, &cb)) && p) {
+                    bool idr = false;
+                    for (DWORD i = 0; i + 4 < cb;) {
+                        if (p[i] == 0 && p[i + 1] == 0 && p[i + 2] == 1) {
+                            BYTE type = p[i + 3] & 0x1F;
+                            if (type == 5) { idr = true; break; }
+                            i += 3;
+                        } else {
+                            ++i;
+                        }
+                    }
+                    if (idr) {
+                        b[0].pSample->SetUINT32(MFSampleExtension_CleanPoint, 1);
+                        plog("CleanPoint set for IDR sample");
+                    }
+                    buf->Unlock();
+                }
+                buf->Release();
+            }
+        }
+        if (hr == S_OK && icodec_ && !gop_restored_) {
+            VARIANT g;
+            VariantInit(&g);
+            g.vt = VT_UI4;
+            g.ulVal = 60;
+            HRESULT gh = icodec_->SetValue(&kGopSize, &g);
+            plog("GOP=60 restore hr=%08lx", (unsigned long)gh);
+            gop_restored_ = true;
+        }
+        if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT) {
+            // Output is delayed; let FFmpeg send another frame and retry,
+            // but throttle the retry loop a little.
+            Sleep(5);
+            QueueEvent(METransformNeedInput, GUID_NULL, S_OK, nullptr);
+            QueueEvent(METransformHaveOutput, GUID_NULL, S_OK, nullptr);
+        }
         return hr;
     }
 
@@ -286,6 +371,7 @@ private:
         }
         if (inner_events_) { inner_events_->Release(); inner_events_ = nullptr; }
         if (inner_) { inner_->Release(); inner_ = nullptr; }
+        if (icodec_) { icodec_->Release(); icodec_ = nullptr; }
         if (attrs_) { attrs_->Release(); attrs_ = nullptr; }
     }
 
@@ -293,6 +379,9 @@ private:
     IMFTransform* inner_ = nullptr;
     IMFMediaEventGenerator* inner_events_ = nullptr;
     IMFAttributes* attrs_ = nullptr;
+    ICodecAPI* icodec_ = nullptr;
+    bool forced_keyframe_ = false;
+    bool gop_restored_ = false;
     MFT_OUTPUT_STREAM_INFO osi_ = {};
     std::thread pump_;
     std::atomic<bool> stop_{false};
@@ -323,9 +412,11 @@ public:
         return n;
     }
     HRESULT STDMETHODCALLTYPE CreateInstance(IUnknown* outer, REFIID riid, void** ppv) override {
+        plog("CreateInstance enter outer=%p", (void*)outer);
         if (outer) return CLASS_E_NOAGGREGATION;
         auto* p = new ProxyMFT();
         HRESULT hr = p->init();
+        plog("CreateInstance init hr=%08lx", (unsigned long)hr);
         if (FAILED(hr)) {
             p->Release();
             return hr;

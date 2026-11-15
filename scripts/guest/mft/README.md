@@ -1,33 +1,85 @@
-# MT H.264 MFT investigation (guest side)
+# MT H.264 MFT → Sunshine hardware encoding (working)
 
-These tools investigate whether Sunshine's Media Foundation encoder
-(`h264_mf` in FFmpeg, encoder name `mediafoundation`) can use the MediaTek
-(M1000 vGPU) hardware H.264 encoder.
+The MediaTek M1000 vGPU registers a hardware H.264 encoder MFT under the
+**NVIDIA H.264 Encoder MFT** CLSID
+`{60F44560-5A20-4857-BFEF-D29773CB8040}`
+(hardware URL `\\?\PCI#VEN_1ED5&DEV_0381...`, DLL `C:\mtgpu-woa\mtmft13.dll`).
 
-## What the MT encoder is
+Sunshine's `encoder = mediafoundation` uses FFmpeg's `h264_mf`, which cannot
+drive this MFT directly:
 
-The MT driver registers its H.264 encoder under the **NVIDIA H.264 Encoder MFT**
-CLSID `{60F44560-5A20-4857-BFEF-D29773CB8040}`. `MFTEnumEx(MFT_ENUM_FLAG_HARDWARE)`
-lists it with hardware URL
-`\\?\PCI#VEN_1ED5&DEV_0381&SUBSYS_00001ED5&REV_01#...` (VEN_1ED5 = MT).
-InprocServer32 points at `C:\mtgpu-woa\mtmft13.dll` (an MT MFT copy).
+* FFmpeg requires hardware MFTs to be **async** (`mfenc.c` errors out
+  otherwise), but its async event loop waits for `METransformHaveOutput`
+  events that the MT MFT does not emit reliably (it has `OutputDelay: 1`).
+* Even when it produces a packet, the MT MFT does not set
+  `MFSampleExtension_CleanPoint`, so FFmpeg does not mark the packet as a
+  keyframe and Sunshine's probe fails with
+  `First packet type is not an IDR frame`.
 
-## Findings (2026-11-15)
+## The proxy
 
-* The MFT is **asynchronous**: `MF_TRANSFORM_ASYNC=1`, `MF_LOW_LATENCY=1`.
-* Input types: NV12, IYUV, YV12, YUY2 (system memory); output: H264.
-* FFmpeg's `h264_mf` hangs on it with `-hw_encoding 1` (frame=0 forever).
-  FFmpeg requires hardware MFTs to be async and its async event loop does not
-  match this MFT's NeedInput/HaveOutput timing (the MFT has an output delay and
-  does not emit HaveOutput reliably after the first input).
-* `mftasync.cpp` proves the MFT itself encodes when driven correctly
-  (ProcessInput succeeds, the MFT logs `bitstream size: ...`), but it needs a
-  caller that tolerates `MF_E_TRANSFORM_NEED_MORE_INPUT`/output delay.
-* `mtmft_sync_proxy.cpp` is an async-facade proxy registered on the NVIDIA
-  CLSID. It passes FFmpeg's "hardware MFT is async" gate and forwards
-  ProcessInput successfully, but FFmpeg still blocks waiting for HaveOutput.
-  A proper fix is a Sunshine encoder that drives the MFT directly, or an
-  FFmpeg `mfenc` change that polls ProcessOutput after ProcessInput.
+`mtmft_sync_proxy.cpp` is an async facade registered on the same CLSID. It
+creates the real MT MFT (`MTMFT_DLL`) and:
+
+1. exposes `MF_TRANSFORM_ASYNC=1` + `MF_TRANSFORM_ASYNC_UNLOCK` and its own
+   `IMFMediaEventGenerator`, mirroring the inner MFT's
+   `NeedInput`/`HaveOutput` events (pump thread);
+2. after a successful `ProcessInput` queues `NeedInput` + `HaveOutput` hints so
+   FFmpeg keeps feeding frames and retries `ProcessOutput` (with a 5 ms
+   throttle on `MF_E_TRANSFORM_NEED_MORE_INPUT`);
+3. forwards `ICodecAPI` to the inner MFT; on the first input it sets
+   `CODECAPI_AVEncVideoForceKeyFrame` and `CODECAPI_AVEncMPVGOPSize = 1`
+   (restores GOP 60 after the first sample);
+4. inspects each output sample and sets
+   `MFSampleExtension_CleanPoint = 1` when it contains an IDR NAL (type 5),
+   so FFmpeg emits `AV_PKT_FLAG_KEY` and Sunshine's IDR probe passes;
+5. links the C++ runtime **statically** — Sunshine.exe's PATH has no
+   `/clangarm64/bin`, and a dynamic `libstdc++` dependency makes the DLL fail
+   to load (`could not create MFT`).
+
+The MT MFT itself emits a valid IDR access unit (SPS/PPS/SEI/IDR NAL); only
+the CleanPoint attribute was missing.
+
+## Verified
+
+* Sunshine log: `Found H.264 encoder: h264_mf [mediafoundation]`,
+  `MFT name: 'NVIDIA H.264 Encoder MFT'`, `New streaming session started`,
+  `CLIENT CONNECTED`.
+* Moonlight VPlus (host) streams 1080p60 and decodes (VAAPI).
+* Host `mthreads-gmi -q`: `Encoder: 25.4%` while streaming (software x264 was
+  0%).
+
+## Build / install / restore
+
+```bash
+# guest, MSYS2 CLANGARM64
+bash build-proxy.sh
+```
+
+```powershell
+# guest, Administrator
+powershell -NoProfile -ExecutionPolicy Bypass -File install-proxy.ps1
+# restore original registration:
+powershell -NoProfile -ExecutionPolicy Bypass -File install-proxy.ps1 -Restore
+```
+
+`install-proxy.ps1` backs up the CLSID to
+`C:\mtgpu-woa\mt-mft-clsid-backup.reg` and restarts the `sun-standalone`
+scheduled task. The registry layout:
+
+```
+HKLM\SOFTWARE\Classes\CLSID\{60F44560-5A20-4857-BFEF-D29773CB8040}\InprocServer32
+  (Default)     C:\mtgpu-woa\mtmft_sync_proxy.dll
+  MTMFT_DLL     C:\mtgpu-woa\mtmft13.dll
+  ThreadingModel Both
+```
+
+Sunshine config (`C:\Program Files\Sunshine\config\sunshine.conf`):
+
+```ini
+encoder = mediafoundation
+min_log_level = info
+```
 
 ## Files
 
@@ -35,30 +87,15 @@ InprocServer32 points at `C:\mtgpu-woa\mtmft13.dll` (an MT MFT copy).
 |---|---|
 | `mftprobe.cpp` | CoCreateInstance + attributes + input/output type enumeration |
 | `mftprobe2.cpp` | LoadLibrary(`mtmft13.dll`) + DllGetClassObject + event generator check |
-| `mftasync.cpp` | minimal async harness: sets types, streams, ProcessInput, events |
-| `mtmft_sync_proxy.cpp` | async-facade proxy DLL (experimental) |
+| `mftasync.cpp` | minimal async harness (proves the MFT encodes when driven correctly) |
+| `mtmft_sync_proxy.cpp` | async-facade proxy (the working solution) |
+| `build-proxy.sh` | MSYS2 CLANGARM64 build with static runtime |
+| `install-proxy.ps1` | register / restore + Sunshine restart |
 
-## Build (guest, MSYS2 CLANGARM64)
+## Notes / limits
 
-```bash
-export MSYSTEM=CLANGARM64
-export PATH=/clangarm64/bin:$PATH
-clang++ -std=c++17 -O1 mftasync.cpp -o mftasync.exe -lmfplat -lmfuuid -lole32 -luuid
-clang++ -std=c++17 -O2 -shared -o mtmft_sync_proxy.dll mtmft_sync_proxy.cpp \
-        -lmfplat -lmfuuid -lole32 -luuid
-```
-
-## Proxy registration / rollback (experimental)
-
-```bat
-reg export "HKLM\SOFTWARE\Classes\CLSID\{60F44560-5A20-4857-BFEF-D29773CB8040}" C:\mtgpu-woa\mt-mft-clsid-backup.reg /y
-reg add "HKLM\SOFTWARE\Classes\CLSID\{60F44560-5A20-4857-BFEF-D29773CB8040}\InprocServer32" /ve /t REG_SZ /d "C:\mtgpu-woa\mtmft_sync_proxy.dll" /f
-reg add "HKLM\SOFTWARE\Classes\CLSID\{60F44560-5A20-4857-BFEF-D29773CB8040}\InprocServer32" /v MTMFT_DLL /t REG_SZ /d "C:\mtgpu-woa\mtmft13.dll" /f
-```
-
-Restore with:
-
-```bat
-reg add "HKLM\SOFTWARE\Classes\CLSID\{60F44560-5A20-4857-BFEF-D29773CB8040}\InprocServer32" /ve /t REG_SZ /d "C:\mtgpu-woa\mtmft13.dll" /f
-reg delete "HKLM\SOFTWARE\Classes\CLSID\{60F44560-5A20-4857-BFEF-D29773CB8040}\InprocServer32" /v MTMFT_DLL /f
-```
+* The proxy adds a small forwarding cost; the 5 ms retry throttle in
+  `ProcessOutput` only triggers while the MFT has no output ready.
+* GOP is set to 1 for the first input (probe/IDR) and restored to 60 after the
+  first sample.
+* `mftasync.exe` / probes are diagnostics only; they are not needed at runtime.
