@@ -35,12 +35,13 @@ Host: Ubuntu 24.04 ARM64 / KDE Plasma 6 Wayland
 
 | Rabbit (Windows running) | Stream Console (low-latency) |
 |---|---|
-| ![Rabbit menu](docs/images/tray-menu.png) | ![Stream Console](docs/images/console.png) |
+| ![Rabbit menu](docs/images/tray-menu.png) | ![Stream Console](docs/images/console.webp) |
 
-![Windows desktop in low-latency mode with the Moonlight FPS overlay](docs/images/windows-low-latency.png)
+![Windows desktop in low-latency mode with the Moonlight FPS overlay](docs/images/windows-low-latency.webp)
 
-> Measured on the current build: the low-latency preset targets 120fps; the Moonlight
-> pipeline shows ~87fps and the host panel runs at 120Hz. Presented frames are compositor-limited.
+> Measured on the current build: the low-latency preset targets 120fps; the console and
+> Moonlight overlay show ~56–63fps, and the host panel runs at 120Hz. Presented frames are
+> compositor-limited.
 
 ## Features
 

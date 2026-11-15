@@ -38,11 +38,11 @@
 
 | 兔头（Windows 运行中） | 串流控制台（低延迟模式） |
 |---|---|
-| ![兔头菜单](docs/images/tray-menu.png) | ![串流控制台](docs/images/console.png) |
+| ![兔头菜单](docs/images/tray-menu.png) | ![串流控制台](docs/images/console.webp) |
 
-![低延迟模式下的 Windows 桌面（Moonlight FPS overlay）](docs/images/windows-low-latency.png)
+![低延迟模式下的 Windows 桌面（Moonlight FPS overlay）](docs/images/windows-low-latency.webp)
 
-> 截图来自当前版本实测：低延迟模式目标 120fps；Moonlight 管线显示约 87fps，
+> 截图来自当前版本实测：低延迟模式目标 120fps；控制台/Moonlight overlay 显示约 56–63fps，
 > host 屏幕 120Hz，实际呈现由合成器限制。
 
 ## 特性
