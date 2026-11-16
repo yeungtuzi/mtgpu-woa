@@ -28,7 +28,7 @@ CONF=${WINVM_CONF:-/etc/winvm.conf}
 : "${QMP_SOCK:=/tmp/qemudisplay.sock}"
 : "${QGA_SOCK:=/tmp/winvm-qga.sock}"
 : "${AGENT_PORT:=8790}"
-: "${VERSION:=1.0}"
+: "${VERSION:=1.1}"
 : "${MEM:=8192}"
 : "${SMP:=4}"
 # The host power management on these laptops can offline the upper cores

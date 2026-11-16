@@ -1,6 +1,24 @@
 # 更新记录
 
-## 未发布
+## 1.1 (2026-11-16)
+
+**主题：原生 Moonlight + Sunshine 重构，RDP/RemoteFX 路径退役。**
+
+1.1 不再把 RDP + RemoteFX/FreeRDP 作为默认显示通道，改为 guest 内源码构建
+Sunshine、宿主源码构建 Moonlight V+ 的原生串流；1.0 的 RDP 路径仅保留为历史参考。
+
+### 主要变化
+
+- **原生 Moonlight + Sunshine**：guest 用 MT VPU 的 H.264 MFT 编码，宿主 Moonlight V+
+  解码渲染；不再依赖 FreeRDP/AVC444。RDP/FreeRDP 路径保留为兜底，但不再是默认交互方式。
+- **串流控制台**（Qt 6/QML）：单实例、关闭窗口即退出并停止轮询；三档 30/60/120fps、
+  运行中 EWMH 全屏、码率/延迟/帧率实时统计。
+- **兔头**：VM 电源、暂停/继续、四色状态图标、显示控制台、查看日志。
+- **Windows 分辨率同步**：控制台选择分辨率，开始/重连时由 Sunshine 以 manual 模式
+  设置 guest 显示；节能档显示 60Hz、采集目标仍为 30fps（vGPU 不支持 30Hz）。
+- **Encode 延迟补全**：MT 异步 MFT 不保留 PTS 时，用 2 秒窗口平均编码耗时兜底，
+  Moonlight 重新上报 Encode，避免总延迟只剩网络 1ms。
+- **轻量 guest**：Sunshine 隐藏 console、`min_log_level=error`；QGA guest-exec 修复。
 
 ### 新增
 
@@ -10,7 +28,22 @@
   安装：`./scripts/install-splash.sh`，随后在
   **系统设置 → 全局主题 → 欢迎画面** 选择 `aibook`。
 
-## 1.0 (2026-11-06)
+### 修复
+
+- Sunshine 未上报 Encode 时不再把 Network 的 1ms 当成总延迟；缺数据时控制台显示
+  `暂无统计数据` / `—`。
+- ARM64 Sunshine 干净构建的兼容性修复（AMF include、atomic shared_ptr、crash handler、
+  clock_cast 等），补丁见 `vendor/patches/sunshine/`。
+
+### 兼容性
+
+- **1.0 已过时（已重构，不建议使用）**：RDP + RemoteFX 显示路径已被 1.1 的原生
+  Moonlight/Sunshine 取代；历史文档见 `docs/INSTALL.md`，仅用于回滚参考。
+
+## 1.0 (2026-11-06) — ⚠️ 已过时（已重构，不建议使用）
+
+> **此版本已被 1.1 重构替代，不建议使用。** 1.0 使用 RDP + RemoteFX/FreeRDP
+> 显示路径；1.1 起默认改为原生 Moonlight/Sunshine。以下内容仅保留历史参考。
 
 **主题：用 GPU 编解码器实现 RemoteFX 原生支持，性能相比原来的 viewer 大幅提升。**
 

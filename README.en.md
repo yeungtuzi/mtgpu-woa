@@ -7,10 +7,11 @@ The rabbit owns VM power/state and the four-state icon. The **Stream Console**
 (Qt 6 / QML native window) owns stream start/stop, runtime fullscreen, bandwidth/latency/FPS
 and settings.
 
-Version `0.1.1` · [Changelog](CHANGELOG.md) · **[中文说明](README.md)**
+Version `1.1` · [Changelog](CHANGELOG.md) · **[中文说明](README.md)**
 
-> The native Moonlight/Sunshine path is the current default. The legacy RDP/FreeRDP path is
-> still in the tree but is not the default interaction model and is outside this README's scope.
+> **Starting with 1.1, the mainline is native Moonlight + Sunshine. The 1.0 RDP/RemoteFX
+> path is obsolete (refactored away) and is not recommended.** RDP/FreeRDP remains only as
+> a historical fallback.
 
 ## Architecture
 
